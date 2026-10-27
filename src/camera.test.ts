@@ -29,11 +29,11 @@ describe('sweepFocus', () => {
     expect(r!.samples.length).toBeGreaterThanOrEqual(7)
   })
 
-  it('finds a farther focus too, up to 30 cm', async () => {
-    const { track, measure } = fakeTrack(0.25)
+  it('finds a farther focus too, up to 20 cm', async () => {
+    const { track, measure } = fakeTrack(0.17)
     const r = await sweepFocus(track, measure)
-    expect(r!.distance).toBeGreaterThan(0.18)
-    expect(r!.distance).toBeLessThanOrEqual(0.3)
+    expect(r!.distance).toBeGreaterThan(0.13)
+    expect(r!.distance).toBeLessThanOrEqual(0.2)
   })
 
   it('does nothing when the phone has no manual focus', async () => {

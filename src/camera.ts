@@ -144,7 +144,7 @@ const settle = () => new Promise((r) => setTimeout(r, 90))
 
 /**
  * Finds the sharpest focus by moving the lens and measuring: 7 steps from the nearest the lens
- * can focus (4 cm at the nearest) out to 30 cm, where labels are scanned, then 4 steps around the
+ * can focus (4 cm at the nearest) out to 20 cm, where labels are scanned, then 4 steps around the
  * best one, then locks there. Steps are even in dioptres (1 / distance), so most are close up.
  */
 export async function sweepFocus(track: MediaStreamTrack, measure: () => number): Promise<FocusSweep | null> {
@@ -152,7 +152,7 @@ export async function sweepFocus(track: MediaStreamTrack, measure: () => number)
   if (!caps.focusDistance || !canSweepFocus(caps)) return null
   const t0 = performance.now()
   const near = Math.max(caps.focusDistance.min, 0.04)
-  const far = Math.max(near * 1.5, Math.min(caps.focusDistance.max, 0.3))
+  const far = Math.max(near * 1.5, Math.min(caps.focusDistance.max, 0.2))
   const samples: [number, number][] = []
   const at = async (dioptre: number) => {
     const d = Math.min(far, Math.max(near, 1 / dioptre))
