@@ -17,10 +17,12 @@ export interface Settings {
   aimBox: boolean
   /** Short side of the camera picture asked for: 1080, 1440 or 2160. */
   cameraHeight: number
-  /** Chosen camera; empty: the default back camera. */
+  /** Chosen camera; empty: the back camera that focuses closest (see probeCameras). */
   cameraId: string
   /** Search for the sharpest focus when a scan starts (phones that let the site move the lens). */
   focusSweep: boolean
+  /** The app's own magnification of the picture (1-4): only the middle is shown and read. */
+  viewZoom: number
 }
 
 export const defaults: Settings = {
@@ -37,9 +39,10 @@ export const defaults: Settings = {
   timeoutSec: 12,
   tester: '',
   aimBox: true,
-  cameraHeight: 1080,
+  cameraHeight: 2160,
   cameraId: '',
   focusSweep: true,
+  viewZoom: 2,
 }
 
 const KEY = 'scanner-settings'

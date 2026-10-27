@@ -1,21 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  cachedProbe,
   capabilities,
-  listCameras,
+  closestFocusing,
   openCamera,
+  probeCameras,
+  saveProbe,
   canSweepFocus,
   setFocus,
   setHardware,
   sweepFocus,
   setTorch,
-  setZoom,
   supportedList,
   trackResolution,
   type CameraCaps,
   type CameraChoice,
 } from './camera'
 import { boxCorners, loadEngine, type Engine } from './ocr/engine'
-import { AIM_H, AIM_W, runScan, type ScanProgress, type ScanResult } from './scanner'
+import { AIM_H, AIM_W, displayScale, runScan, type ScanProgress, type ScanResult } from './scanner'
 import { loadSettings, saveSettings, setupName, type Settings } from './settings'
 import { allScans, putScan, syncPending, testConnection, type Line, type Outcome, type StoredScan } from './store'
 
@@ -35,8 +37,9 @@ export default function App() {
   const [cameraError, setCameraError] = useState('')
   const [hwApplied, setHwApplied] = useState<string[]>([])
   const [torch, setTorchState] = useState(false)
-  const [zoom, setZoomState] = useState<number | null>(null)
-  const [cameras, setCameras] = useState<CameraChoice[]>([])
+  const [cameras, setCameras] = useState<CameraChoice[]>(() => cachedProbe() ?? [])
+  /** Bumped to look at the cameras again. */
+  const [probeRun, setProbeRun] = useState(0)
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const [result, setResult] = useState<ScanResult | null>(null)
@@ -82,26 +85,39 @@ export default function App() {
     if (screen !== 'scan' || !videoRef.current) return
     let cancelled = false
     let opened: MediaStreamTrack | null = null
-    openCamera(videoRef.current, settings.cameraId, settings.cameraHeight).then(
-      async (t) => {
-        if (cancelled) return t.stop()
-        opened = t
-        setTrack(t)
-        const c = capabilities(t)
-        setCaps(c)
-        setZoomState(c.zoom ? (t.getSettings() as { zoom?: number }).zoom ?? c.zoom.min : null)
-        setCameraError('')
-        setCameras(await listCameras())
-      },
-      (e) => setCameraError(String(e)),
-    )
+    const video = videoRef.current
+    ;(async () => {
+      // Learn the cameras once; the choice "automatic" is the back camera that focuses closest.
+      let probe = cachedProbe()
+      if (!probe) {
+        probe = await probeCameras()
+        saveProbe(probe)
+      }
+      if (cancelled) return
+      setCameras(probe)
+      const id = settings.cameraId || closestFocusing(probe)
+      let t: MediaStreamTrack
+      try {
+        t = await openCamera(video, id, settings.cameraHeight)
+      } catch (e) {
+        if (!id) throw e
+        // The chosen camera is gone (ids can change): forget what was learnt and use the default.
+        saveProbe(null)
+        t = await openCamera(video, '', settings.cameraHeight)
+      }
+      if (cancelled) return t.stop()
+      opened = t
+      setTrack(t)
+      setCaps(capabilities(t))
+      setCameraError('')
+    })().catch((e) => setCameraError(String(e)))
     return () => {
       cancelled = true
       opened?.stop()
       setTrack(null)
       setTorchState(false)
     }
-  }, [screen, settings.cameraId, settings.cameraHeight])
+  }, [screen, settings.cameraId, settings.cameraHeight, probeRun])
 
   useEffect(() => {
     if (track) setHardware(track, settings.hardware, settings.exposureComp).then(setHwApplied)
@@ -143,7 +159,7 @@ export default function App() {
       hardware: settings.hardware,
       voting: settings.voting,
       torch,
-      zoom,
+      zoom: settings.viewZoom,
       voteFrames: settings.voteFrames,
       blurThreshold: settings.blurThreshold,
       detLimit: settings.detLimit,
@@ -169,6 +185,7 @@ export default function App() {
       resolution: track ? trackResolution(track) : '',
       aimBox: settings.aimBox,
       camera: track?.label ?? '',
+      cameraMinFocus: cameras.find((c) => c.label === track?.label)?.minFocus ?? null,
       focusSweep: sweeping,
       focusSweeps: result.sweeps,
       cameraSupports: supportedList(caps),
@@ -202,11 +219,11 @@ export default function App() {
       {screen === 'scan' && (
         <main className="scan">
           <div className="viewfinder">
-            <video ref={videoRef} playsInline muted />
+            <video ref={videoRef} playsInline muted style={{ transform: `scale(${settings.viewZoom})` }} />
             {settings.aimBox && (
               <div className="aim" style={{ width: `${AIM_W * 100}%`, height: `${AIM_H * 100}%` }} />
             )}
-            {scanning && progress && <LiveBoxes video={videoRef.current} progress={progress} />}
+            {scanning && progress && <LiveBoxes video={videoRef.current} progress={progress} zoom={settings.viewZoom} />}
           </div>
           {cameraError && <p className="error">המצלמה לא נפתחה: {cameraError}</p>}
           {engineError && <p className="error">המודל לא נטען: {engineError}</p>}
@@ -230,42 +247,18 @@ export default function App() {
             )}
           </div>
 
-          {caps.zoom && zoom !== null && (
-            <div className="quick">
-              {[1, 2, 3, 4, 6]
-                .filter((z) => z >= caps.zoom!.min && z <= caps.zoom!.max)
-                .map((z) => (
-                  <button
-                    key={z}
-                    className={Math.abs(zoom - z) < 0.05 ? 'chip on' : 'chip'}
-                    onClick={() => {
-                      setZoomState(z)
-                      if (track) setZoom(track, z)
-                    }}
-                  >
-                    ×{z}
-                  </button>
-                ))}
-            </div>
-          )}
-
-          {caps.zoom && zoom !== null && (
-            <label className="zoom">
-              זום {zoom.toFixed(1)}
-              <input
-                type="range"
-                min={caps.zoom.min}
-                max={caps.zoom.max}
-                step={caps.zoom.step || 0.1}
-                value={zoom}
-                onChange={(e) => {
-                  const z = Number(e.target.value)
-                  setZoomState(z)
-                  if (track) setZoom(track, z)
-                }}
-              />
-            </label>
-          )}
+          <div className="quick">
+            <span className="hint">הגדלה</span>
+            {[1, 1.5, 2, 3, 4].map((z) => (
+              <button
+                key={z}
+                className={settings.viewZoom === z ? 'chip on' : 'chip'}
+                onClick={() => setSettings({ ...settings, viewZoom: z })}
+              >
+                ×{z}
+              </button>
+            ))}
+          </div>
 
           {scanning ? (
             <>
@@ -295,6 +288,11 @@ export default function App() {
           setSettings={setSettings}
           supports={supportedList(caps)}
           cameras={cameras}
+          activeCamera={track?.label ?? ''}
+          onProbeAgain={() => {
+            saveProbe(null)
+            setProbeRun(probeRun + 1)
+          }}
           resolution={track ? trackResolution(track) : ''}
           hwApplied={hwApplied}
           loadMs={engine?.loadMs ?? null}
@@ -318,12 +316,12 @@ function Toggle({ label, on, set }: { label: string; on: boolean; set: (v: boole
 }
 
 /** Boxes of the last frame read, drawn over the live video (which is shown with object-fit: cover). */
-function LiveBoxes({ video, progress }: { video: HTMLVideoElement | null; progress: ScanProgress }) {
+function LiveBoxes({ video, progress, zoom }: { video: HTMLVideoElement | null; progress: ScanProgress; zoom: number }) {
   if (!video || !video.videoWidth) return null
   const { region, scale } = progress
   const vw = video.clientWidth
   const vh = video.clientHeight
-  const s = Math.max(vw / video.videoWidth, vh / video.videoHeight)
+  const s = displayScale(video.videoWidth, video.videoHeight, vw, vh, zoom)
   const ox = (vw - video.videoWidth * s) / 2
   const oy = (vh - video.videoHeight * s) / 2
   return (
@@ -532,6 +530,8 @@ function SettingsScreen({
   setSettings,
   supports,
   cameras,
+  activeCamera,
+  onProbeAgain,
   resolution,
   hwApplied,
   loadMs,
@@ -541,6 +541,8 @@ function SettingsScreen({
   setSettings: (s: Settings) => void
   supports: string[]
   cameras: CameraChoice[]
+  activeCamera: string
+  onProbeAgain: () => void
   resolution: string
   hwApplied: string[]
   loadMs: number | null
@@ -579,16 +581,20 @@ function SettingsScreen({
 
       <h2>מצלמה</h2>
       <label>
-        איזו מצלמה (בחלק מהטלפונים מצלמה אחרת מתמקדת קרוב יותר)
+        איזו מצלמה
         <select value={s.cameraId} onChange={(e) => setSettings({ ...s, cameraId: e.target.value })}>
-          <option value="">ברירת מחדל (אחורית)</option>
+          <option value="">אוטומטי: האחורית שמתמקדת הכי קרוב</option>
           {cameras.map((c) => (
             <option key={c.deviceId} value={c.deviceId}>
               {c.label}
+              {c.back ? '' : ' (קדמית)'}
+              {c.minFocus === null ? '' : ` · מתמקדת מ־${Math.round(c.minFocus * 100)} ס״מ`}
             </option>
           ))}
         </select>
       </label>
+      <p className="hint" dir="auto">פתוחה עכשיו: {activeCamera || '…'}</p>
+      <button onClick={onProbeAgain}>בדוק את המצלמות שוב</button>
       <label>
         רזולוציה
         <select value={s.cameraHeight} onChange={(e) => setSettings({ ...s, cameraHeight: Number(e.target.value) })}>

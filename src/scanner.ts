@@ -17,12 +17,25 @@ export interface Region {
 export const AIM_W = 0.8
 export const AIM_H = 0.3
 
+/** Video-to-screen scale: object-fit: cover, then the app's own magnification. */
+export function displayScale(videoW: number, videoH: number, elW: number, elH: number, zoom: number): number {
+  return Math.max(elW / videoW, elH / videoH) * zoom
+}
+
 /**
- * The part of the video that is visible in an element of `elW` x `elH` shown with object-fit: cover,
- * reduced to its middle `fw` x `fh` share.
+ * The part of the video that is visible in an element of `elW` x `elH` (object-fit: cover, magnified
+ * `zoom` times around the centre), reduced to its middle `fw` x `fh` share.
  */
-export function aimRegion(videoW: number, videoH: number, elW: number, elH: number, fw: number, fh: number): Region {
-  const s = Math.max(elW / videoW, elH / videoH)
+export function aimRegion(
+  videoW: number,
+  videoH: number,
+  elW: number,
+  elH: number,
+  fw: number,
+  fh: number,
+  zoom = 1,
+): Region {
+  const s = displayScale(videoW, videoH, elW, elH, zoom)
   const visW = elW / s
   const visH = elH / s
   const w = visW * fw
@@ -71,10 +84,11 @@ function grab(video: HTMLVideoElement, r: Region): HTMLCanvasElement {
   return c
 }
 
-function regionOf(video: HTMLVideoElement, aimBox: boolean): Region {
-  const full = { x: 0, y: 0, w: video.videoWidth, h: video.videoHeight }
-  if (!aimBox || !video.clientWidth) return full
-  return aimRegion(video.videoWidth, video.videoHeight, video.clientWidth, video.clientHeight, AIM_W, AIM_H)
+/** What is read: the aiming box, or with the box off everything visible on screen. */
+function regionOf(video: HTMLVideoElement, s: Settings): Region {
+  if (!video.clientWidth) return { x: 0, y: 0, w: video.videoWidth, h: video.videoHeight }
+  const [fw, fh] = s.aimBox ? [AIM_W, AIM_H] : [1, 1]
+  return aimRegion(video.videoWidth, video.videoHeight, video.clientWidth, video.clientHeight, fw, fh, s.viewZoom)
 }
 
 /** Sharpness of the middle of the frame, measured on a copy `w` pixels wide. */
@@ -113,7 +127,7 @@ export async function runScan(
   const start = performance.now()
   const sweeps: FocusSweep[] = []
   // Focus is judged on the aiming box at a finer scale than the blur gate, since the text is small.
-  const measure = () => sharpnessOf(grab(video, regionOf(video, s.aimBox)), 640)
+  const measure = () => sharpnessOf(grab(video, regionOf(video, s)), 640)
   const sweep = async () => {
     if (!focuser) return
     const r = await focuser(measure)
@@ -131,7 +145,7 @@ export async function runScan(
   let doneAt: number | null = null
 
   while (!signal.stopped && performance.now() - start < s.timeoutSec * 1000) {
-    const region = regionOf(video, s.aimBox)
+    const region = regionOf(video, s)
     const scale = frameScale(region)
     const frame = grab(video, region)
     last = frame
@@ -184,7 +198,7 @@ export async function runScan(
   let voted = vote(reads)
   // With voting, a text seen in only one frame is noise, unless only one frame had any text.
   if (s.voting && framesWithText >= 2) voted = voted.filter((v) => v.frames >= 2)
-  const original = best?.original ?? last ?? grab(video, regionOf(video, s.aimBox))
+  const original = best?.original ?? last ?? grab(video, regionOf(video, s))
   if (voted.length && doneAt === null) doneAt = performance.now()
   return {
     reads: inReadingOrder(voted),

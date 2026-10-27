@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sweepFocus } from './camera'
+import { closestFocusing, sweepFocus, type CameraChoice } from './camera'
 
 /** A stand-in camera track whose picture is sharpest with the lens at `best` metres. */
 function fakeTrack(best: number, manual = true) {
@@ -29,14 +29,27 @@ describe('sweepFocus', () => {
     expect(r!.samples.length).toBeGreaterThanOrEqual(7)
   })
 
-  it('finds a farther focus too', async () => {
-    const { track, measure } = fakeTrack(0.6)
+  it('finds a farther focus too, up to 30 cm', async () => {
+    const { track, measure } = fakeTrack(0.25)
     const r = await sweepFocus(track, measure)
-    expect(r!.distance).toBeGreaterThan(0.4)
+    expect(r!.distance).toBeGreaterThan(0.18)
+    expect(r!.distance).toBeLessThanOrEqual(0.3)
   })
 
   it('does nothing when the phone has no manual focus', async () => {
     const { track, measure } = fakeTrack(0.12, false)
     expect(await sweepFocus(track, measure)).toBeNull()
+  })
+})
+
+describe('closestFocusing', () => {
+  const cam = (deviceId: string, back: boolean, minFocus: number | null): CameraChoice => ({ deviceId, label: deviceId, back, minFocus })
+
+  it('picks the back camera that focuses closest', () => {
+    expect(closestFocusing([cam('main', true, 0.1), cam('wide', true, 0.03), cam('front', false, 0.01)])).toBe('wide')
+  })
+
+  it('falls back to the default camera when no camera says how close it focuses', () => {
+    expect(closestFocusing([cam('main', true, null), cam('wide', true, null)])).toBe('')
   })
 })

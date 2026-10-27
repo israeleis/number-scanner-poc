@@ -16,14 +16,61 @@ export interface CameraCaps {
 export interface CameraChoice {
   deviceId: string
   label: string
+  back: boolean
+  /** The closest the camera can focus, in metres; null when the phone does not say. */
+  minFocus: number | null
 }
 
-/** Back cameras (labels are only known after camera permission was given). */
-export async function listCameras(): Promise<CameraChoice[]> {
-  const devices = await navigator.mediaDevices.enumerateDevices()
-  return devices
-    .filter((d) => d.kind === 'videoinput')
-    .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `camera ${i + 1}` }))
+const stopAll = (s: MediaStream) => s.getTracks().forEach((t) => t.stop())
+
+/**
+ * Opens every camera for a moment to learn which way it faces and how close it focuses.
+ * Camera names and ids are only given after permission, so one camera is opened first.
+ */
+export async function probeCameras(): Promise<CameraChoice[]> {
+  stopAll(await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } }))
+  const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput')
+  const out: CameraChoice[] = []
+  for (const [i, d] of devices.entries()) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: d.deviceId } } })
+      const t = stream.getVideoTracks()[0]
+      const caps = capabilities(t) as CameraCaps & { facingMode?: string[] }
+      const facing = t.getSettings().facingMode
+      stopAll(stream)
+      out.push({
+        deviceId: d.deviceId,
+        label: d.label || `camera ${i + 1}`,
+        back: facing === 'environment' || !!caps.facingMode?.includes('environment') || /back|rear|environment/i.test(d.label),
+        minFocus: caps.focusDistance && caps.focusDistance.min > 0 ? caps.focusDistance.min : null,
+      })
+    } catch {
+      // A camera that will not open (busy, or not allowed) is left out.
+    }
+  }
+  return out
+}
+
+/** The back camera that focuses closest; '' (the default back camera) when no camera says. */
+export function closestFocusing(cameras: CameraChoice[]): string {
+  const known = cameras.filter((c) => c.back && c.minFocus !== null)
+  if (!known.length) return ''
+  return known.reduce((a, b) => (b.minFocus! < a.minFocus! ? b : a)).deviceId
+}
+
+const PROBE_KEY = 'camera-probe'
+
+export function cachedProbe(): CameraChoice[] | null {
+  try {
+    return JSON.parse(localStorage.getItem(PROBE_KEY) ?? 'null')
+  } catch {
+    return null
+  }
+}
+
+export function saveProbe(cameras: CameraChoice[] | null) {
+  if (cameras) localStorage.setItem(PROBE_KEY, JSON.stringify(cameras))
+  else localStorage.removeItem(PROBE_KEY)
 }
 
 /** `height` is the short side asked for (1080, 1440, 2160); the phone may give less. */
@@ -74,9 +121,6 @@ export function setTorch(track: MediaStreamTrack, on: boolean) {
   return apply(track, { torch: on })
 }
 
-export function setZoom(track: MediaStreamTrack, zoom: number) {
-  return apply(track, { zoom })
-}
 
 /** A focus distance in metres, or null for continuous autofocus. */
 export async function setFocus(track: MediaStreamTrack, distance: number | null) {
@@ -100,15 +144,15 @@ const settle = () => new Promise((r) => setTimeout(r, 90))
 
 /**
  * Finds the sharpest focus by moving the lens and measuring: 7 steps from the nearest the lens
- * can focus out to 1 metre, then 4 steps around the best one, then locks there. Steps are even
- * in dioptres (1 / distance), which puts most of them close up, where small text is.
+ * can focus (4 cm at the nearest) out to 30 cm, where labels are scanned, then 4 steps around the
+ * best one, then locks there. Steps are even in dioptres (1 / distance), so most are close up.
  */
 export async function sweepFocus(track: MediaStreamTrack, measure: () => number): Promise<FocusSweep | null> {
   const caps = capabilities(track)
   if (!caps.focusDistance || !canSweepFocus(caps)) return null
   const t0 = performance.now()
-  const near = Math.max(caps.focusDistance.min, 0.03)
-  const far = Math.max(near * 1.5, Math.min(caps.focusDistance.max, 1))
+  const near = Math.max(caps.focusDistance.min, 0.04)
+  const far = Math.max(near * 1.5, Math.min(caps.focusDistance.max, 0.3))
   const samples: [number, number][] = []
   const at = async (dioptre: number) => {
     const d = Math.min(far, Math.max(near, 1 / dioptre))

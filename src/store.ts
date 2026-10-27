@@ -26,7 +26,8 @@ export interface ScanRecord {
   hardware: boolean
   voting: boolean
   torch: boolean
-  zoom: number | null
+  /** The app's magnification of the picture. */
+  zoom: number
   voteFrames: number
   blurThreshold: number
   detLimit: number
@@ -49,6 +50,8 @@ export interface ScanRecord {
   /** Only the aiming box was read (the images are of that box only). */
   aimBox: boolean
   camera: string
+  /** The closest that camera can focus, in metres (null: unknown). */
+  cameraMinFocus: number | null
   focusSweep: boolean
   /** Each focus search: chosen distance (metres), sharpness, time, and every step. */
   focusSweeps: { distance: number; sharpness: number; ms: number; samples: [number, number][] }[]

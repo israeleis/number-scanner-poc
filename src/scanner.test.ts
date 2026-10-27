@@ -17,3 +17,14 @@ describe('aimRegion', () => {
     expect(r.y).toBeCloseTo((1080 - 324) / 2)
   })
 })
+
+describe('aimRegion with magnification', () => {
+  it('magnifying twice halves the region around the centre', () => {
+    const a = aimRegion(1920, 1080, 300, 400, 0.8, 0.3, 1)
+    const b = aimRegion(1920, 1080, 300, 400, 0.8, 0.3, 2)
+    expect(b.w).toBeCloseTo(a.w / 2)
+    expect(b.h).toBeCloseTo(a.h / 2)
+    expect(b.x + b.w / 2).toBeCloseTo(960)
+    expect(b.y + b.h / 2).toBeCloseTo(540)
+  })
+})

@@ -7,7 +7,7 @@ const KEY = 'change-me'
 const COLUMNS = [
   'id', 'createdAt', 'tester', 'outcome', 'summary', 'setup', 'preprocess', 'hardware', 'voting',
   'torch', 'zoom', 'timeToResultMs', 'lines', 'frameReads', 'framesRead', 'framesBlurry', 'sharpness',
-  'voteFrames', 'blurThreshold', 'detLimit', 'minConfidence', 'scene', 'notes', 'resolution', 'aimBox', 'camera',
+  'voteFrames', 'blurThreshold', 'detLimit', 'minConfidence', 'scene', 'notes', 'resolution', 'aimBox', 'camera', 'cameraMinFocus',
   'focusSweep', 'focusSweeps',
   'cameraSupports', 'hardwareApplied', 'modelLoadMs', 'device', 'appVersion', 'originalImage', 'processedImage',
 ]
