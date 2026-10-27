@@ -2,6 +2,7 @@
 import type { Engine, TextRead } from './ocr/engine'
 import { laplacianVariance, preprocess, toGray } from './ocr/imageops'
 import { inReadingOrder, vote, type FrameRead, type VotedRead } from './ocr/vote'
+import type { FocusSweep } from './camera'
 import type { Settings } from './settings'
 
 /** A rectangle in video pixels. */
@@ -39,6 +40,9 @@ export interface ScanProgress {
   scale: number
 }
 
+/** Moves the lens to the sharpest focus for what is in the aiming box; null when the phone cannot. */
+export type Focuser = (measure: () => number) => Promise<FocusSweep | null>
+
 export interface ScanResult {
   reads: VotedRead[]
   original: HTMLCanvasElement
@@ -48,6 +52,8 @@ export interface ScanResult {
   framesBlurry: number
   sharpness: number
   timeToResultMs: number | null
+  /** Focus searches made during the scan, in order. */
+  sweeps: FocusSweep[]
 }
 
 const MAX_SIDE = 1280
@@ -71,9 +77,8 @@ function regionOf(video: HTMLVideoElement, aimBox: boolean): Region {
   return aimRegion(video.videoWidth, video.videoHeight, video.clientWidth, video.clientHeight, AIM_W, AIM_H)
 }
 
-/** Sharpness of the middle of the frame, measured on a 320-pixel-wide copy. */
-export function sharpnessOf(frame: HTMLCanvasElement): number {
-  const w = 320
+/** Sharpness of the middle of the frame, measured on a copy `w` pixels wide. */
+export function sharpnessOf(frame: HTMLCanvasElement, w = 320): number {
   const h = Math.round((frame.height / frame.width) * w)
   const c = document.createElement('canvas')
   c.width = w
@@ -103,8 +108,19 @@ export async function runScan(
   s: Settings,
   onProgress: (p: ScanProgress) => void,
   signal: { stopped: boolean },
+  focuser: Focuser | null,
 ): Promise<ScanResult> {
   const start = performance.now()
+  const sweeps: FocusSweep[] = []
+  // Focus is judged on the aiming box at a finer scale than the blur gate, since the text is small.
+  const measure = () => sharpnessOf(grab(video, regionOf(video, s.aimBox)), 640)
+  const sweep = async () => {
+    if (!focuser) return
+    const r = await focuser(measure)
+    if (r) sweeps.push(r)
+  }
+  if (s.focusSweep) await sweep()
+  let blurryInARow = 0
   const reads: FrameRead[] = []
   let framesRead = 0
   let framesBlurry = 0
@@ -122,10 +138,16 @@ export async function runScan(
     const sharp = sharpnessOf(frame)
     if (sharp < s.blurThreshold) {
       framesBlurry++
+      // Still blurred after a few frames: the phone or the text moved. Search again (twice at most).
+      if (s.focusSweep && ++blurryInARow >= 4 && sweeps.length < 3) {
+        blurryInARow = 0
+        await sweep()
+      }
       onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: [], region, scale })
       await nextFrame()
       continue
     }
+    blurryInARow = 0
     const processed = s.preprocess ? processedCopy(frame) : null
     const frameReads = await engine.read(processed ?? frame, {
       detLimit: s.detLimit,
@@ -173,5 +195,6 @@ export async function runScan(
     framesBlurry,
     sharpness: framesRead ? Math.round(sharpSum / framesRead) : 0,
     timeToResultMs: doneAt === null ? null : Math.round(doneAt - start),
+    sweeps,
   }
 }

@@ -78,10 +78,65 @@ export function setZoom(track: MediaStreamTrack, zoom: number) {
   return apply(track, { zoom })
 }
 
-/** A focus distance in the phone's units (usually metres), or null for continuous autofocus. */
+/** A focus distance in metres, or null for continuous autofocus. */
 export async function setFocus(track: MediaStreamTrack, distance: number | null) {
   if (distance === null) return apply(track, { focusMode: 'continuous' })
   return apply(track, { focusMode: 'manual', focusDistance: distance })
+}
+
+export function canSweepFocus(caps: CameraCaps): boolean {
+  return !!caps.focusDistance && !!caps.focusMode?.includes('manual')
+}
+
+export interface FocusSweep {
+  distance: number
+  sharpness: number
+  ms: number
+  /** [distance, sharpness] of every step, for studying later. */
+  samples: [number, number][]
+}
+
+const settle = () => new Promise((r) => setTimeout(r, 90))
+
+/**
+ * Finds the sharpest focus by moving the lens and measuring: 7 steps from the nearest the lens
+ * can focus out to 1 metre, then 4 steps around the best one, then locks there. Steps are even
+ * in dioptres (1 / distance), which puts most of them close up, where small text is.
+ */
+export async function sweepFocus(track: MediaStreamTrack, measure: () => number): Promise<FocusSweep | null> {
+  const caps = capabilities(track)
+  if (!caps.focusDistance || !canSweepFocus(caps)) return null
+  const t0 = performance.now()
+  const near = Math.max(caps.focusDistance.min, 0.03)
+  const far = Math.max(near * 1.5, Math.min(caps.focusDistance.max, 1))
+  const samples: [number, number][] = []
+  const at = async (dioptre: number) => {
+    const d = Math.min(far, Math.max(near, 1 / dioptre))
+    if (!(await setFocus(track, d))) return -1
+    await settle()
+    const s = measure()
+    samples.push([Math.round(d * 1000) / 1000, Math.round(s)])
+    return s
+  }
+  const dNear = 1 / near
+  const dFar = 1 / far
+  const step = (dNear - dFar) / 6
+  let best = { dioptre: dNear, sharp: -1 }
+  for (let i = 0; i <= 6; i++) {
+    const dioptre = dNear - i * step
+    const sharp = await at(dioptre)
+    if (sharp > best.sharp) best = { dioptre, sharp }
+  }
+  for (const off of [-0.5, -0.25, 0.25, 0.5]) {
+    const dioptre = best.dioptre + off * step
+    if (dioptre > dNear || dioptre < dFar) continue
+    const sharp = await at(dioptre)
+    if (sharp > best.sharp) best = { dioptre, sharp }
+  }
+  const distance = Math.min(far, Math.max(near, 1 / best.dioptre))
+  await setFocus(track, distance)
+  await settle()
+  return { distance: Math.round(distance * 1000) / 1000, sharpness: Math.round(best.sharp), ms: Math.round(performance.now() - t0), samples }
 }
 
 /**

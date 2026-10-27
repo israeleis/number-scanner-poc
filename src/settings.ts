@@ -19,6 +19,8 @@ export interface Settings {
   cameraHeight: number
   /** Chosen camera; empty: the default back camera. */
   cameraId: string
+  /** Search for the sharpest focus when a scan starts (phones that let the site move the lens). */
+  focusSweep: boolean
 }
 
 export const defaults: Settings = {
@@ -37,6 +39,7 @@ export const defaults: Settings = {
   aimBox: true,
   cameraHeight: 1080,
   cameraId: '',
+  focusSweep: true,
 }
 
 const KEY = 'scanner-settings'
@@ -53,7 +56,7 @@ export function saveSettings(s: Settings) {
   localStorage.setItem(KEY, JSON.stringify(s))
 }
 
-/** Short name of the active combination, e.g. "P1 H0 V1 T1". Torch is part of it. */
-export function setupName(s: Pick<Settings, 'preprocess' | 'hardware' | 'voting'>, torch: boolean): string {
-  return `P${+s.preprocess} H${+s.hardware} V${+s.voting} T${+torch}`
+/** Short name of the active combination, e.g. "P1 H0 V1 F1 T1". Torch is part of it. */
+export function setupName(s: Pick<Settings, 'preprocess' | 'hardware' | 'voting' | 'focusSweep'>, torch: boolean): string {
+  return `P${+s.preprocess} H${+s.hardware} V${+s.voting} F${+s.focusSweep} T${+torch}`
 }

@@ -5,19 +5,40 @@ import { ctcDecode } from './ctc'
 
 const BASE = import.meta.env.BASE_URL
 
+/**
+ * A text region: a rectangle turned by `angle` (radians, clockwise in screen coordinates) around
+ * its centre, `length` along the text and `thickness` across it; x, y, w, h bound it upright.
+ */
 export interface Box {
   x: number
   y: number
   w: number
   h: number
+  cx: number
+  cy: number
+  length: number
+  thickness: number
+  angle: number
   score: number
+}
+
+/** The four corners of a box, in order around it. */
+export function boxCorners(b: Pick<Box, 'cx' | 'cy' | 'length' | 'thickness' | 'angle'>): [number, number][] {
+  const ux = Math.cos(b.angle), uy = Math.sin(b.angle)
+  const hl = b.length / 2, ht = b.thickness / 2
+  return [
+    [-hl, -ht],
+    [hl, -ht],
+    [hl, ht],
+    [-hl, ht],
+  ].map(([a, c]) => [b.cx + a * ux - c * uy, b.cy + a * uy + c * ux])
 }
 
 export interface TextRead {
   text: string
   confidence: number
   box: Box
-  /** How the crop was turned to read it: 0, 180, 90 (clockwise) or -90. */
+  /** Degrees the text was turned to read it (its slant, plus 180 when it was upside down). */
   rotation: number
 }
 
@@ -73,18 +94,19 @@ export class Engine {
       .slice(0, options.maxBoxes)
     const reads: TextRead[] = []
     for (const box of boxes) {
-      // The model reads left to right only. Tall boxes are vertical text: try both quarter turns.
-      // A wide box read with doubt may be upside down: try it turned half way too.
-      const tall = box.h > box.w * 1.5
-      let best = { ...(await this.recognize(canvas, box, tall ? 90 : 0)), rotation: tall ? 90 : 0 }
-      for (const rotation of tall ? [-90] : best.confidence < 0.9 ? [180] : []) {
-        const r = await this.recognize(canvas, box, rotation)
-        if (r.confidence > best.confidence) best = { ...r, rotation }
+      // The box is straightened along its own slant, so text at any angle reaches the model level.
+      // The slant does not tell which end is the start: a doubtful read is tried upside down too.
+      let best = { ...(await this.recognize(canvas, box, false)), flipped: false }
+      if (best.confidence < 0.9) {
+        const r = await this.recognize(canvas, box, true)
+        if (r.confidence > best.confidence) best = { ...r, flipped: true }
       }
-      if (best.text && best.confidence >= options.minConfidence) reads.push({ ...best, box })
+      const rotation = Math.round((box.angle * 180) / Math.PI + (best.flipped ? 180 : 0))
+      if (best.text && best.confidence >= options.minConfidence) {
+        reads.push({ text: best.text, confidence: best.confidence, box, rotation })
+      }
     }
-    // Top to bottom, then right to left in a row is not needed: Latin text reads left to right.
-    return reads.sort((a, b) => (Math.abs(a.box.y - b.box.y) < a.box.h / 2 ? a.box.x - b.box.x : a.box.y - b.box.y))
+    return reads.sort((a, b) => (Math.abs(a.box.cy - b.box.cy) < a.box.h / 2 ? a.box.cx - b.box.cx : a.box.cy - b.box.cy))
   }
 
   private async detect(canvas: HTMLCanvasElement, limit: number): Promise<Box[]> {
@@ -103,21 +125,13 @@ export class Engine {
     }
     const out = await this.det.run({ [this.det.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, h, w]) })
     const prob = out[this.det.outputNames[0]].data as Float32Array
-    return dbBoxes(prob, w, h).map((b) => ({
-      x: (b.x * canvas.width) / w,
-      y: (b.y * canvas.height) / h,
-      w: (b.w * canvas.width) / w,
-      h: (b.h * canvas.height) / h,
-      score: b.score,
-    }))
+    return dbBoxes(prob, w, h, canvas.width / w, canvas.height / h)
   }
 
-  private async recognize(canvas: HTMLCanvasElement, box: Box, rotation: number) {
+  private async recognize(canvas: HTMLCanvasElement, box: Box, flipped: boolean) {
     const H = 48
-    const quarter = Math.abs(rotation) === 90
-    const [bw, bh] = quarter ? [box.h, box.w] : [box.w, box.h]
-    const W = Math.min(640, Math.max(16, Math.ceil((H * bw) / bh)))
-    const px = drawScaled(canvas, box.x, box.y, box.w, box.h, W, H, rotation)
+    const W = Math.min(640, Math.max(16, Math.ceil((H * box.length) / box.thickness)))
+    const px = drawStraightened(canvas, box, W, H, flipped)
     const input = new Float32Array(3 * W * H)
     for (let i = 0; i < W * H; i++) {
       for (let c = 0; c < 3; c++) input[c * W * H + i] = (px[i * 4 + (2 - c)] / 255 - 0.5) / 0.5
@@ -131,54 +145,62 @@ export class Engine {
 
 let scratch: HTMLCanvasElement | null = null
 
-/** Draws the source rectangle into a w x h image, turned by `rotation` degrees clockwise. */
-function drawScaled(
-  src: HTMLCanvasElement,
-  sx: number,
-  sy: number,
-  sw: number,
-  sh: number,
-  w: number,
-  h: number,
-  rotation = 0,
-) {
+function scratchContext(w: number, h: number) {
   scratch ??= document.createElement('canvas')
   scratch.width = w
   scratch.height = h
-  const ctx = scratch.getContext('2d', { willReadFrequently: true })!
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  return scratch.getContext('2d', { willReadFrequently: true })!
+}
+
+function drawScaled(src: HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number, w: number, h: number) {
+  const ctx = scratchContext(w, h)
+  ctx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h)
+  return ctx.getImageData(0, 0, w, h).data
+}
+
+/** Cuts the box out as a level w x h image (text running left to right), or upside down. */
+function drawStraightened(src: HTMLCanvasElement, box: Box, w: number, h: number, flipped: boolean) {
+  const ctx = scratchContext(w, h)
   ctx.translate(w / 2, h / 2)
-  ctx.rotate((rotation * Math.PI) / 180)
-  // After a quarter turn the drawn rectangle is h wide and w high.
-  const [dw, dh] = Math.abs(rotation) === 90 ? [h, w] : [w, h]
-  ctx.drawImage(src, sx, sy, sw, sh, -dw / 2, -dh / 2, dw, dh)
+  if (flipped) ctx.rotate(Math.PI)
+  ctx.scale(w / box.length, h / box.thickness)
+  ctx.rotate(-box.angle)
+  ctx.translate(-box.cx, -box.cy)
+  ctx.drawImage(src, 0, 0)
   return ctx.getImageData(0, 0, w, h).data
 }
 
 /**
- * DB post-processing: threshold the probability map, take connected regions, keep the ones whose
- * mean probability is high enough, and grow each box (the model predicts shrunk text regions).
- * Boxes are axis-aligned; strongly rotated text is not straightened.
+ * DB post-processing: threshold the probability map and take connected regions whose mean probability
+ * is high enough. Each region's slant comes from the spread of its pixels (principal axis), so slanted
+ * and vertical text gets a turned box. Boxes are grown, since the model predicts shrunk text regions.
+ * `sx`, `sy` scale map pixels to image pixels.
  */
-export function dbBoxes(prob: Float32Array, w: number, h: number, thresh = 0.3, boxThresh = 0.6, unclip = 1.6): Box[] {
+export function dbBoxes(
+  prob: Float32Array,
+  w: number,
+  h: number,
+  sx = 1,
+  sy = 1,
+  thresh = 0.3,
+  boxThresh = 0.6,
+  unclip = 1.6,
+): Box[] {
   const seen = new Uint8Array(w * h)
   const boxes: Box[] = []
   const stack: number[] = []
+  const pixels: number[] = []
   for (let start = 0; start < w * h; start++) {
     if (seen[start] || prob[start] <= thresh) continue
-    let minX = w, minY = h, maxX = 0, maxY = 0, sum = 0, count = 0
+    let sum = 0
+    pixels.length = 0
     stack.push(start)
     seen[start] = 1
     while (stack.length) {
       const i = stack.pop()!
       const x = i % w
-      const y = (i / w) | 0
+      pixels.push(i)
       sum += prob[i]
-      count++
-      if (x < minX) minX = x
-      if (x > maxX) maxX = x
-      if (y < minY) minY = y
-      if (y > maxY) maxY = y
       for (const n of [i - 1, i + 1, i - w, i + w]) {
         if (n < 0 || n >= w * h || seen[n] || prob[n] <= thresh) continue
         if ((n === i - 1 && x === 0) || (n === i + 1 && x === w - 1)) continue
@@ -186,15 +208,71 @@ export function dbBoxes(prob: Float32Array, w: number, h: number, thresh = 0.3, 
         stack.push(n)
       }
     }
-    const bw = maxX - minX + 1
-    const bh = maxY - minY + 1
-    if (count < 10 || Math.min(bw, bh) < 3 || sum / count < boxThresh) continue
-    const d = (bw * bh * unclip) / (2 * (bw + bh))
-    const x0 = Math.max(0, minX - d)
-    const y0 = Math.max(0, minY - d)
-    const x1 = Math.min(w, maxX + 1 + d)
-    const y1 = Math.min(h, maxY + 1 + d)
-    boxes.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, score: sum / count })
+    const count = pixels.length
+    if (count < 10 || sum / count < boxThresh) continue
+
+    // Centre and spread, in image pixels.
+    let mx = 0, my = 0
+    for (const i of pixels) {
+      mx += ((i % w) + 0.5) * sx
+      my += (((i / w) | 0) + 0.5) * sy
+    }
+    mx /= count
+    my /= count
+    let cxx = 0, cyy = 0, cxy = 0
+    for (const i of pixels) {
+      const dx = ((i % w) + 0.5) * sx - mx
+      const dy = (((i / w) | 0) + 0.5) * sy - my
+      cxx += dx * dx
+      cyy += dy * dy
+      cxy += dx * dy
+    }
+    let angle = 0.5 * Math.atan2(2 * cxy, cxx - cyy)
+    // Extent along the text and across it (each map pixel covers sx by sy image pixels).
+    const extent = (a: number) => {
+      const ux = Math.cos(a), uy = Math.sin(a)
+      let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity
+      for (const i of pixels) {
+        const dx = ((i % w) + 0.5) * sx - mx
+        const dy = (((i / w) | 0) + 0.5) * sy - my
+        const along = dx * ux + dy * uy
+        const across = -dx * uy + dy * ux
+        if (along < lo) lo = along
+        if (along > hi) hi = along
+        if (across < lo2) lo2 = across
+        if (across > hi2) hi2 = across
+      }
+      const pad = Math.abs(ux) * sx + Math.abs(uy) * sy
+      const pad2 = Math.abs(uy) * sx + Math.abs(ux) * sy
+      return { lo, hi, lo2, hi2, length: hi - lo + pad, thickness: hi2 - lo2 + pad2 }
+    }
+    let e = extent(angle)
+    if (e.thickness > e.length) {
+      angle += Math.PI / 2
+      e = extent(angle)
+    }
+    // Keep the slant within ±90°; whether the text is upside down is decided when reading.
+    if (angle > Math.PI / 2) angle -= Math.PI
+    if (angle <= -Math.PI / 2) angle += Math.PI
+    e = extent(angle)
+    if (Math.min(e.length / sx, e.thickness / sy) < 3) continue
+    const ux = Math.cos(angle), uy = Math.sin(angle)
+    // The middle of the extent, which is not always the pixel average.
+    const midA = (e.lo + e.hi) / 2
+    const midC = (e.lo2 + e.hi2) / 2
+    const cx = mx + midA * ux - midC * uy
+    const cy = my + midA * uy + midC * ux
+    const d = (e.length * e.thickness * unclip) / (2 * (e.length + e.thickness))
+    const length = e.length + 2 * d
+    const thickness = e.thickness + 2 * d
+    const corners = boxCorners({ cx, cy, length, thickness, angle })
+    const xs = corners.map((c) => c[0])
+    const ys = corners.map((c) => c[1])
+    const x0 = Math.max(0, Math.min(...xs))
+    const y0 = Math.max(0, Math.min(...ys))
+    const x1 = Math.min(w * sx, Math.max(...xs))
+    const y1 = Math.min(h * sy, Math.max(...ys))
+    boxes.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, cx, cy, length, thickness, angle, score: sum / count })
   }
   return boxes
 }

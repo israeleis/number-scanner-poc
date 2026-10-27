@@ -3,8 +3,10 @@ import {
   capabilities,
   listCameras,
   openCamera,
+  canSweepFocus,
   setFocus,
   setHardware,
+  sweepFocus,
   setTorch,
   setZoom,
   supportedList,
@@ -12,7 +14,7 @@ import {
   type CameraCaps,
   type CameraChoice,
 } from './camera'
-import { loadEngine, type Engine } from './ocr/engine'
+import { boxCorners, loadEngine, type Engine } from './ocr/engine'
 import { AIM_H, AIM_W, runScan, type ScanProgress, type ScanResult } from './scanner'
 import { loadSettings, saveSettings, setupName, type Settings } from './settings'
 import { allScans, putScan, syncPending, testConnection, type Line, type Outcome, type StoredScan } from './store'
@@ -34,8 +36,6 @@ export default function App() {
   const [hwApplied, setHwApplied] = useState<string[]>([])
   const [torch, setTorchState] = useState(false)
   const [zoom, setZoomState] = useState<number | null>(null)
-  /** Manual focus distance; null: continuous autofocus. */
-  const [focus, setFocusState] = useState<number | null>(null)
   const [cameras, setCameras] = useState<CameraChoice[]>([])
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState<ScanProgress | null>(null)
@@ -100,7 +100,6 @@ export default function App() {
       opened?.stop()
       setTrack(null)
       setTorchState(false)
-      setFocusState(null)
     }
   }, [screen, settings.cameraId, settings.cameraHeight])
 
@@ -108,7 +107,9 @@ export default function App() {
     if (track) setHardware(track, settings.hardware, settings.exposureComp).then(setHwApplied)
   }, [track, settings.hardware, settings.exposureComp])
 
-  const setup = setupName(settings, torch)
+  // Focus search counts only where the phone lets the site move the lens.
+  const sweeping = settings.focusSweep && canSweepFocus(caps)
+  const setup = setupName({ ...settings, focusSweep: sweeping }, torch)
   const setupCount = scans.filter((s) => s.record.setup === setup).length
 
   async function startScan() {
@@ -117,11 +118,15 @@ export default function App() {
     setScanning(true)
     setProgress(null)
     try {
-      const r = await runScan(videoRef.current, engine, settings, setProgress, stopRef.current)
+      const t = track
+      const focuser = t && canSweepFocus(caps) ? (measure: () => number) => sweepFocus(t, measure) : null
+      const r = await runScan(videoRef.current, engine, settings, setProgress, stopRef.current, focuser)
       setResult(r)
       setScreen('report')
     } finally {
       setScanning(false)
+      // Back to the phone's own autofocus between scans.
+      if (track && canSweepFocus(caps)) setFocus(track, null)
     }
   }
 
@@ -147,7 +152,12 @@ export default function App() {
       frameReads: result.frameReads.map((r) => ({
         text: r.text,
         confidence: round(r.confidence),
-        box: { x: Math.round(r.box.x), y: Math.round(r.box.y), w: Math.round(r.box.w), h: Math.round(r.box.h) },
+        box: {
+          cx: Math.round(r.box.cx),
+          cy: Math.round(r.box.cy),
+          length: Math.round(r.box.length),
+          thickness: Math.round(r.box.thickness),
+        },
         rotation: r.rotation,
       })),
       framesRead: result.framesRead,
@@ -159,7 +169,8 @@ export default function App() {
       resolution: track ? trackResolution(track) : '',
       aimBox: settings.aimBox,
       camera: track?.label ?? '',
-      focusDistance: focus,
+      focusSweep: sweeping,
+      focusSweeps: result.sweeps,
       cameraSupports: supportedList(caps),
       hardwareApplied: hwApplied,
       appVersion: __BUILD__,
@@ -205,6 +216,9 @@ export default function App() {
             <Toggle label="עיבוד תמונה" on={settings.preprocess} set={(v) => setSettings({ ...settings, preprocess: v })} />
             <Toggle label="בקרת מצלמה" on={settings.hardware} set={(v) => setSettings({ ...settings, hardware: v })} />
             <Toggle label="הצבעה" on={settings.voting} set={(v) => setSettings({ ...settings, voting: v })} />
+            {canSweepFocus(caps) && (
+              <Toggle label="חיפוש פוקוס" on={settings.focusSweep} set={(v) => setSettings({ ...settings, focusSweep: v })} />
+            )}
             {caps.torch && (
               <Toggle
                 label="פנס"
@@ -235,34 +249,6 @@ export default function App() {
             </div>
           )}
 
-          {caps.focusDistance && caps.focusMode?.includes('manual') && (
-            <div className="quick">
-              <button
-                className={focus === null ? 'chip on' : 'chip'}
-                onClick={async () => {
-                  if (track && (await setFocus(track, null))) setFocusState(null)
-                }}
-              >
-                פוקוס אוטו
-              </button>
-              <label className="zoom">
-                פוקוס {focus === null ? 'אוטו' : `${Math.round(focus * 100)} ס״מ`}
-                <input
-                  type="range"
-                  min={caps.focusDistance.min}
-                  max={Math.min(caps.focusDistance.max, 1)}
-                  step={caps.focusDistance.step || 0.01}
-                  value={focus ?? caps.focusDistance.min}
-                  onChange={(e) => {
-                    const d = Number(e.target.value)
-                    setFocusState(d)
-                    if (track) setFocus(track, d)
-                  }}
-                />
-              </label>
-            </div>
-          )}
-
           {caps.zoom && zoom !== null && (
             <label className="zoom">
               זום {zoom.toFixed(1)}
@@ -284,7 +270,7 @@ export default function App() {
           {scanning ? (
             <>
               <p className="hint">
-                חדות {Math.round(progress?.sharpness ?? 0)} · נקראו {progress?.framesRead ?? 0} פריימים · מטושטשים{' '}
+                {!progress && sweeping ? 'מחפש פוקוס… ' : ''}חדות {Math.round(progress?.sharpness ?? 0)} · נקראו {progress?.framesRead ?? 0} פריימים · מטושטשים{' '}
                 {progress?.framesBlurry ?? 0}
               </p>
               <button className="big stop" onClick={() => (stopRef.current.stopped = true)}>
@@ -347,10 +333,11 @@ function LiveBoxes({ video, progress }: { video: HTMLVideoElement | null; progre
           key={i}
           className="livebox"
           style={{
-            left: ox + (region.x + r.box.x / scale) * s,
-            top: oy + (region.y + r.box.y / scale) * s,
-            width: (r.box.w / scale) * s,
-            height: (r.box.h / scale) * s,
+            left: ox + (region.x + r.box.cx / scale) * s,
+            top: oy + (region.y + r.box.cy / scale) * s,
+            width: (r.box.length / scale) * s,
+            height: (r.box.thickness / scale) * s,
+            transform: `translate(-50%, -50%) rotate(${r.box.angle}rad)`,
           }}
         >
           <span dir="ltr">{r.text}</span>
@@ -407,7 +394,13 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
     ctx.drawImage(result.original, 0, 0)
     ctx.lineWidth = Math.max(2, c.width / 400)
     ctx.strokeStyle = '#00e676'
-    for (const r of result.frameReads) ctx.strokeRect(r.box.x, r.box.y, r.box.w, r.box.h)
+    for (const r of result.frameReads) {
+      const corners = boxCorners(r.box)
+      ctx.beginPath()
+      corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)))
+      ctx.closePath()
+      ctx.stroke()
+    }
     return c.toDataURL('image/jpeg', 0.8)
   })()
 
