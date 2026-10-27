@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cleanDigits, ctcDecode } from './ctc'
-import { boxCorners, dbBoxes, inTextOrder } from './engine'
+import { boxCorners, dbBoxes, inTextOrder, joinLineParts } from './engine'
 import { laplacianVariance, preprocess } from './imageops'
 
 describe('ctcDecode', () => {
@@ -126,5 +126,28 @@ describe('cleanDigits', () => {
   })
   it('leaves words with few digits alone', () => {
     expect(cleanDigits('O\'Neil 12" pipe')).toBe('O\'Neil 12" pipe')
+  })
+})
+
+describe('joinLineParts', () => {
+  const box = (cx: number, cy: number, length: number, thickness = 20, angle = 0) => ({
+    cx, cy, length, thickness, angle, x: cx - length / 2, y: cy - thickness / 2, w: length, h: thickness, score: 0.9,
+  })
+
+  it('joins two pieces of one line split at a hyphen', () => {
+    const out = joinLineParts([box(100, 50, 100), box(195, 52, 100)])
+    expect(out).toHaveLength(1)
+    expect(out[0].length).toBeCloseTo(195, 0)
+  })
+
+  it('keeps apart two columns half a line apart, and lines above each other', () => {
+    expect(joinLineParts([box(100, 50, 100), box(210, 50, 100)])).toHaveLength(2)
+    expect(joinLineParts([box(100, 50, 100), box(100, 80, 100)])).toHaveLength(2)
+  })
+
+  it('joins pieces of a slanted line', () => {
+    const a = Math.PI / 6
+    const p = (d: number) => box(200 + d * Math.cos(a), 200 + d * Math.sin(a), 90, 20, a)
+    expect(joinLineParts([p(-43), p(43)])).toHaveLength(1)
   })
 })

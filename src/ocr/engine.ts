@@ -149,7 +149,7 @@ export class Engine {
     }
     const out = await this.det.run({ [this.det.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, h, w]) })
     const prob = out[this.det.outputNames[0]].data as Float32Array
-    return dbBoxes(prob, w, h, canvas.width / w, canvas.height / h)
+    return joinLineParts(dbBoxes(prob, w, h, canvas.width / w, canvas.height / h))
   }
 
   /**
@@ -245,6 +245,62 @@ function drawStraightened(src: HTMLCanvasElement, box: Box, w: number, h: number
   ctx.translate(-box.cx, -box.cy)
   ctx.drawImage(src, 0, 0)
   return ctx.getImageData(0, 0, w, h).data
+}
+
+/**
+ * Large, sharp text is sometimes found as several boxes along one line, split at a hyphen or colon
+ * ("X1404ZA-" and "-NK101"), and the two pieces touch or overlap (both hold the hyphen). Boxes at
+ * about the same slant and thickness, on the same line, touching or overlapping, are joined into one
+ * box. A real gap is left alone: on the phone's pictures two columns of a label sat only half a line's
+ * thickness apart ("RAS-MT7902" and "5.2/5.3/6GHz").
+ */
+export function joinLineParts(boxes: Box[]): Box[] {
+  const out = [...boxes]
+  let joined = true
+  while (joined) {
+    joined = false
+    for (let i = 0; i < out.length && !joined; i++) {
+      for (let j = i + 1; j < out.length && !joined; j++) {
+        const a = out[i]
+        const b = out[j]
+        let da = Math.abs(a.angle - b.angle) % Math.PI
+        if (da > Math.PI / 2) da = Math.PI - da
+        const t = Math.max(a.thickness, b.thickness)
+        if (da > 0.17 || Math.min(a.thickness, b.thickness) < t * 0.6) continue
+        // Along and across the line of the longer box.
+        const ang = a.length >= b.length ? a.angle : b.angle
+        const ux = Math.cos(ang), uy = Math.sin(ang)
+        const along = (x: number, y: number) => x * ux + y * uy
+        const across = (x: number, y: number) => -x * uy + y * ux
+        if (Math.abs(across(a.cx, a.cy) - across(b.cx, b.cy)) > t * 0.5) continue
+        const [a0, a1] = [along(a.cx, a.cy) - a.length / 2, along(a.cx, a.cy) + a.length / 2]
+        const [b0, b1] = [along(b.cx, b.cy) - b.length / 2, along(b.cx, b.cy) + b.length / 2]
+        const gap = Math.max(a0, b0) - Math.min(a1, b1)
+        if (gap > t * 0.1) continue
+        const lo = Math.min(a0, b0)
+        const hi = Math.max(a1, b1)
+        const mid = (lo + hi) / 2
+        const acr = (across(a.cx, a.cy) + across(b.cx, b.cy)) / 2
+        const box = { cx: mid * ux - acr * uy, cy: mid * uy + acr * ux, length: hi - lo, thickness: t, angle: ang }
+        const corners = boxCorners(box)
+        const xs = corners.map((c) => c[0])
+        const ys = corners.map((c) => c[1])
+        const x = Math.max(0, Math.min(...xs))
+        const y = Math.max(0, Math.min(...ys))
+        out[i] = {
+          ...box,
+          x,
+          y,
+          w: Math.max(a.x + a.w, b.x + b.w, Math.max(...xs)) - x,
+          h: Math.max(a.y + a.h, b.y + b.h, Math.max(...ys)) - y,
+          score: Math.min(a.score, b.score),
+        }
+        out.splice(j, 1)
+        joined = true
+      }
+    }
+  }
+  return out
 }
 
 /**

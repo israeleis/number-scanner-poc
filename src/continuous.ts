@@ -43,6 +43,12 @@ export const key = (t: string) =>
     .toUpperCase()
     .replace(/O/g, '0')
     .replace(/\s+/g, '')
+/**
+ * Two keys are the same line when equal, or when one is a piece of the other (at least 3
+ * characters): a frame may read only part of a line (":R4N0LP028239165" of "SN:R4N0LP028239165").
+ */
+const sameLine = (a: string, b: string) =>
+  a === b || (Math.min(a.length, b.length) >= 3 && (a.includes(b) || b.includes(a)))
 const isIdentity = (t: string) => (t.match(/[0-9]/g) ?? []).length >= 4
 
 /**
@@ -136,21 +142,27 @@ export class LabelTracker {
     }
     this.emptyFrames = 0
     const cur = this.current
-    const known = cur ? steady.filter((k) => cur.includes(k)).length : 0
+    const inLabel = (k: string) => cur !== null && cur.some((c) => sameLine(c, k))
+    const known = steady.filter(inLabel).length
     // A new number while none of the label's numbers is in view any more: the next label.
     const newIdentity =
       cur !== null &&
       cur.some(isIdentity) &&
-      steady.some((k) => isIdentity(k) && !cur.includes(k)) &&
-      !steady.some((k) => isIdentity(k) && cur.includes(k))
+      steady.some((k) => isIdentity(k) && !inLabel(k)) &&
+      !steady.some((k) => isIdentity(k) && inLabel(k))
     if (!cur || known < steady.length / 2 || newIdentity) {
       this.current = steady
       // Lines seen before the switch must be seen again to count for the new label.
       this.recent = [new Set(keys)]
       return { started: true, added: steady }
     }
-    const added = steady.filter((k) => !cur.includes(k))
-    if (added.length) this.current = mergeOrder(cur, steady)
+    // A longer read of a line already in the label replaces it; a piece of one adds nothing.
+    let kept = cur.map((c) => steady.find((k) => k.length > c.length && k.includes(c)) ?? c)
+    kept = kept.filter((l, i) => kept.indexOf(l) === i)
+    const added = steady.filter((k) => !kept.some((c) => sameLine(c, k)))
+    if (added.length || kept.some((l, i) => l !== cur[i])) {
+      this.current = mergeOrder(kept, steady.filter((k) => kept.includes(k) || added.includes(k)))
+    }
     return { started: false, added }
   }
 }

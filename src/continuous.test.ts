@@ -88,6 +88,26 @@ describe('LabelTracker with real reads from the phone', () => {
   })
 })
 
+describe('LabelTracker with lines read in pieces', () => {
+  const feed = (t: LabelTracker, lines: string[]) => t.feed(lines.map((text) => ({ text, confidence: 0.99 })), 0.97)
+
+  it('pieces of the label\'s lines do not start a new label or add lines', () => {
+    const t = new LabelTracker(2)
+    feed(t, ['X1404ZA-NK101', 'SN:R4N0LP028239165', 'CN:MNN2', 'MFD:2023-04', '12M'])
+    const u = feed(t, ['X1404ZA-', '-NK101', ':R4NOLPO28239165', 'CN : MNN2', 'MFD:2023-', '-04', '12M'])
+    expect(u.started).toBe(false)
+    expect(u.added).toEqual([])
+    expect(t.current).toHaveLength(5)
+  })
+
+  it('a longer read of a line replaces the shorter one', () => {
+    const t = new LabelTracker(2)
+    feed(t, ['X1404ZA-NK', 'CN:MNN2'])
+    feed(t, ['X1404ZA-NK101', 'CN:MNN2'])
+    expect(t.current).toEqual([key('X1404ZA-NK101'), key('CN:MNN2')])
+  })
+})
+
 describe('words', () => {
   it('splits a line into its words', () => {
     expect(words('Tracking No.  2405N22.5')).toEqual(['Tracking', 'No.', '2405N22.5'])
