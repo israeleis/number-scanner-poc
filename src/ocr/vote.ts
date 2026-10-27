@@ -8,6 +8,11 @@ export interface FrameRead {
   weight: number
   /** Which frame of the scan it came from. */
   frame: number
+  /** Centre of the text in the frame, 0-1 from the left and from the top. */
+  x?: number
+  y?: number
+  /** Height of the text as a share of the frame height. */
+  h?: number
 }
 
 export interface VotedRead {
@@ -17,6 +22,9 @@ export interface VotedRead {
   /** In how many frames this text was seen. */
   frames: number
   confidence: number
+  x: number
+  y: number
+  h: number
 }
 
 export function levenshtein(a: string, b: string): number {
@@ -111,6 +119,22 @@ function voteGroup(group: FrameRead[]): VotedRead {
     text += bestCh
     agreementSum += total ? bestW / total : 0
   }
-  const confidence = group.reduce((a, r) => a + r.confidence, 0) / group.length
-  return { text, agreement: ref.length ? agreementSum / ref.length : 0, frames: new Set(group.map((r) => r.frame)).size, confidence }
+  const avg = (f: (r: FrameRead) => number) => group.reduce((a, r) => a + f(r), 0) / group.length
+  return {
+    text,
+    agreement: ref.length ? agreementSum / ref.length : 0,
+    frames: new Set(group.map((r) => r.frame)).size,
+    confidence: avg((r) => r.confidence),
+    x: avg((r) => r.x ?? 0),
+    y: avg((r) => r.y ?? 0),
+    h: avg((r) => r.h ?? 0),
+  }
+}
+
+/** Top to bottom; texts on the same row (centres closer than half a text height) left to right. */
+export function inReadingOrder<T extends { x: number; y: number; h: number }>(reads: T[]): T[] {
+  return [...reads].sort((a, b) => {
+    const sameRow = Math.abs(a.y - b.y) < Math.max(a.h, b.h) / 2
+    return sameRow ? a.x - b.x : a.y - b.y
+  })
 }

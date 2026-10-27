@@ -1,7 +1,21 @@
 // Scans are kept on the phone (IndexedDB) and sent to the Apps Script web app when it is set up
 // and the network is up. A scan is marked sent only after the script confirms it.
 
+/** correct: every line right and none missed. not_read: no text read at all. */
 export type Outcome = 'correct' | 'wrong' | 'not_read'
+
+export interface Line {
+  /** 1 is the top line. */
+  line: number
+  /** What the scan read; empty for a line it missed. */
+  read: string
+  /** What is really written (optional for a right read). */
+  actual: string
+  outcome: 'correct' | 'wrong' | 'missed'
+  confidence: number | null
+  frames: number | null
+  agreement: number | null
+}
 
 export interface ScanRecord {
   id: string
@@ -18,11 +32,9 @@ export interface ScanRecord {
   detLimit: number
   minConfidence: number
   outcome: Outcome
-  /** The read the outcome is about. */
-  chosen: string
-  /** What is really written, typed by the tester (optional). */
-  actual: string
-  reads: { text: string; confidence: number; frames: number; agreement: number }[]
+  /** Every line read, top to bottom, e.g. "6 | Gizo | Nishnianidze St." */
+  summary: string
+  lines: Line[]
   /** The single frame kept as the image, with each read and its box (pixels of that image). */
   frameReads: { text: string; confidence: number; box: { x: number; y: number; w: number; h: number } }[]
   framesRead: number

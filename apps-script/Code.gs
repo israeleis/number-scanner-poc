@@ -1,13 +1,19 @@
-// Receives scans from the number scanner app: one row per scan in the "scans" sheet, and the two
-// images of each scan in a "scan-images" folder next to this spreadsheet.
+// Receives scans from the number scanner app: one row per scan in the "scans" sheet, one row per text
+// line in the "lines" sheet, and the two images of each scan in a "scan-images" folder next to this
+// spreadsheet.
 // Set KEY to any secret word and type the same word in the app's settings.
 const KEY = 'change-me'
 
 const COLUMNS = [
-  'id', 'createdAt', 'tester', 'outcome', 'chosen', 'actual', 'setup', 'preprocess', 'hardware', 'voting',
-  'torch', 'zoom', 'timeToResultMs', 'reads', 'frameReads', 'framesRead', 'framesBlurry', 'sharpness',
+  'id', 'createdAt', 'tester', 'outcome', 'summary', 'setup', 'preprocess', 'hardware', 'voting',
+  'torch', 'zoom', 'timeToResultMs', 'lines', 'frameReads', 'framesRead', 'framesBlurry', 'sharpness',
   'voteFrames', 'blurThreshold', 'detLimit', 'minConfidence', 'scene', 'notes', 'resolution',
   'cameraSupports', 'hardwareApplied', 'modelLoadMs', 'device', 'appVersion', 'originalImage', 'processedImage',
+]
+
+const LINE_COLUMNS = [
+  'scanId', 'createdAt', 'tester', 'setup', 'line', 'read', 'actual', 'outcome', 'confidence', 'frames',
+  'agreement', 'scene',
 ]
 
 function doGet(e) {
@@ -22,11 +28,8 @@ function doPost(e) {
   lock.waitLock(30000)
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet()
-    const sheet = ss.getSheetByName('scans') || ss.insertSheet('scans')
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow(COLUMNS)
-      sheet.setFrozenRows(1)
-    }
+    const sheet = sheetWithHeader(ss, 'scans', COLUMNS)
+    const linesSheet = sheetWithHeader(ss, 'lines', LINE_COLUMNS)
     const r = body.record
     // The app retries until it hears back, so the same scan can arrive twice.
     if (sheet.getRange('A:A').createTextFinder(r.id).matchEntireCell(true).findNext()) {
@@ -41,10 +44,25 @@ function doPost(e) {
       if (Array.isArray(v) && c === 'scene') return v.join(', ')
       return typeof v === 'object' ? JSON.stringify(v) : v
     }))
+    const rows = (r.lines || []).map(function (l) {
+      return [r.id, r.createdAt, r.tester, r.setup, l.line, l.read, l.actual, l.outcome,
+        l.confidence === null ? '' : l.confidence, l.frames === null ? '' : l.frames,
+        l.agreement === null ? '' : l.agreement, (r.scene || []).join(', ')]
+    })
+    if (rows.length) linesSheet.getRange(linesSheet.getLastRow() + 1, 1, rows.length, LINE_COLUMNS.length).setValues(rows)
     return reply({ ok: true })
   } finally {
     lock.releaseLock()
   }
+}
+
+function sheetWithHeader(ss, name, columns) {
+  const sheet = ss.getSheetByName(name) || ss.insertSheet(name)
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(columns)
+    sheet.setFrozenRows(1)
+  }
+  return sheet
 }
 
 function imagesFolder(ss) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { alignTo, levenshtein, vote } from './vote'
+import { alignTo, inReadingOrder, levenshtein, vote } from './vote'
 
 let frame = 0
 const read = (text: string, confidence = 0.9, weight = 1) => ({ text, confidence, weight, frame: frame++ })
@@ -42,5 +42,13 @@ describe('alignment helpers', () => {
   })
   it('aligns a shorter read to the reference', () => {
     expect(alignTo('A123', 'A23')).toEqual(['A', '', '2', '3'])
+  })
+})
+
+describe('inReadingOrder', () => {
+  it('sorts top to bottom, and left to right within a row', () => {
+    const at = (text: string, x: number, y: number) => ({ text, x, y, h: 0.05 })
+    const out = inReadingOrder([at('bottom', 0.5, 0.8), at('right', 0.7, 0.21), at('left', 0.2, 0.2)])
+    expect(out.map((r) => r.text)).toEqual(['left', 'right', 'bottom'])
   })
 })

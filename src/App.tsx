@@ -3,7 +3,7 @@ import { capabilities, openCamera, setHardware, setTorch, setZoom, supportedList
 import { loadEngine, type Engine, type TextRead } from './ocr/engine'
 import { runScan, type ScanProgress, type ScanResult } from './scanner'
 import { loadSettings, saveSettings, setupName, type Settings } from './settings'
-import { allScans, putScan, syncPending, testConnection, type Outcome, type StoredScan } from './store'
+import { allScans, putScan, syncPending, testConnection, type Line, type Outcome, type StoredScan } from './store'
 
 declare const __BUILD__: string
 
@@ -108,7 +108,7 @@ export default function App() {
     }
   }
 
-  async function saveReport(fields: { outcome: Outcome; chosen: string; actual: string; scene: string[]; notes: string }) {
+  async function saveReport(fields: ReportFields) {
     if (!result) return
     const toBlob = (c: HTMLCanvasElement) =>
       new Promise<Blob>((res) => c.toBlob((b) => res(b!), 'image/jpeg', 0.9))
@@ -127,7 +127,6 @@ export default function App() {
       detLimit: settings.detLimit,
       minConfidence: settings.minConfidence,
       ...fields,
-      reads: result.reads.map((r) => ({ text: r.text, confidence: round(r.confidence), frames: r.frames, agreement: round(r.agreement) })),
       frameReads: result.frameReads.map((r) => ({
         text: r.text,
         confidence: round(r.confidence),
@@ -289,18 +288,41 @@ function LiveBoxes({ video, reads }: { video: HTMLVideoElement | null; reads: Te
   )
 }
 
-function Report({
-  result,
-  onSave,
-  onCancel,
-}: {
-  result: ScanResult
-  onSave: (f: { outcome: Outcome; chosen: string; actual: string; scene: string[]; notes: string }) => void
-  onCancel: () => void
-}) {
-  const [chosen, setChosen] = useState(result.reads[0]?.text ?? '')
-  const [outcome, setOutcome] = useState<Outcome | null>(result.reads.length ? null : 'not_read')
-  const [actual, setActual] = useState('')
+interface ReportFields {
+  outcome: Outcome
+  summary: string
+  lines: Line[]
+  scene: string[]
+  notes: string
+}
+
+/** A line on the report screen before it is saved. `key` only keeps React rows stable. */
+interface DraftLine {
+  key: number
+  read: string
+  actual: string
+  mark: 'correct' | 'wrong' | null
+  missed: boolean
+  confidence: number | null
+  frames: number | null
+  agreement: number | null
+}
+
+let nextKey = 0
+
+function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: ReportFields) => void; onCancel: () => void }) {
+  const [lines, setLines] = useState<DraftLine[]>(() =>
+    result.reads.map((r) => ({
+      key: nextKey++,
+      read: r.text,
+      actual: '',
+      mark: null,
+      missed: false,
+      confidence: round(r.confidence),
+      frames: r.frames,
+      agreement: round(r.agreement),
+    })),
+  )
   const [scene, setScene] = useState<string[]>(() => JSON.parse(localStorage.getItem('last-scene') ?? '[]'))
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
@@ -317,7 +339,39 @@ function Report({
     return c.toDataURL('image/jpeg', 0.8)
   })()
 
+  const update = (key: number, patch: Partial<DraftLine>) =>
+    setLines(lines.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  /** Adds an empty "missed" line after position `at` (-1: at the top). */
+  const addMissed = (at: number) => {
+    const blank: DraftLine = { key: nextKey++, read: '', actual: '', mark: null, missed: true, confidence: null, frames: null, agreement: null }
+    setLines([...lines.slice(0, at + 1), blank, ...lines.slice(at + 1)])
+  }
   const toggleScene = (s: string) => setScene(scene.includes(s) ? scene.filter((x) => x !== s) : [...scene, s])
+
+  const readLines = lines.filter((l) => !l.missed)
+  const missedLines = lines.filter((l) => l.missed && l.actual.trim())
+  const ready = readLines.every((l) => l.mark)
+
+  function save() {
+    const kept = lines.filter((l) => !l.missed || l.actual.trim())
+    const saved: Line[] = kept.map((l, i) => ({
+      line: i + 1,
+      read: l.read,
+      actual: l.missed ? l.actual.trim() : l.actual.trim() || (l.mark === 'correct' ? l.read : ''),
+      outcome: l.missed ? 'missed' : l.mark!,
+      confidence: l.confidence,
+      frames: l.frames,
+      agreement: l.agreement,
+    }))
+    const outcome: Outcome = !readLines.length
+      ? 'not_read'
+      : saved.every((l) => l.outcome === 'correct')
+        ? 'correct'
+        : 'wrong'
+    setSaving(true)
+    localStorage.setItem('last-scene', JSON.stringify(scene))
+    onSave({ outcome, summary: readLines.map((l) => l.read).join(' | '), lines: saved, scene, notes })
+  }
 
   return (
     <main className="report">
@@ -327,39 +381,42 @@ function Report({
         {result.framesRead} פריימים נקראו · {result.framesBlurry} מטושטשים
       </p>
 
-      {result.reads.length ? (
-        <ul className="reads">
-          {result.reads.map((r) => (
-            <li key={r.text}>
-              <button className={r.text === chosen ? 'read chosen' : 'read'} onClick={() => setChosen(r.text)}>
-                <span dir="ltr" className="text">{r.text}</span>
-                <span className="meta">
-                  {Math.round(r.confidence * 100)}% · {r.frames} פריימים · הסכמה {Math.round(r.agreement * 100)}%
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="big-text">לא זוהה כלום</p>
+      {!readLines.length && <p className="big-text">לא זוהה כלום</p>}
+      {readLines.length > 1 && (
+        <button className="link" onClick={() => setLines(lines.map((l) => (l.missed ? l : { ...l, mark: 'correct' })))}>
+          סמן את כל השורות ✓
+        </button>
       )}
 
-      <div className="outcomes">
-        <button className={outcome === 'correct' ? 'ok on' : 'ok'} disabled={!result.reads.length} onClick={() => setOutcome('correct')}>
-          ✓ נכון
-        </button>
-        <button className={outcome === 'wrong' ? 'bad on' : 'bad'} disabled={!result.reads.length} onClick={() => setOutcome('wrong')}>
-          ✗ לא נכון
-        </button>
-        <button className={outcome === 'not_read' ? 'none on' : 'none'} onClick={() => setOutcome('not_read')}>
-          לא זוהה
-        </button>
-      </div>
-
-      <label>
-        מה כתוב באמת (לא חובה)
-        <input dir="ltr" value={actual} onChange={(e) => setActual(e.target.value)} autoCapitalize="characters" />
-      </label>
+      <AddLine onClick={() => addMissed(-1)} />
+      {lines.map((l, i) => (
+        <div key={l.key}>
+          {l.missed ? (
+            <div className="line missed">
+              <span className="tag">שורה שפוספסה</span>
+              <input dir="ltr" placeholder="מה כתוב" value={l.actual} autoFocus onChange={(e) => update(l.key, { actual: e.target.value })} />
+              <button className="link" onClick={() => setLines(lines.filter((x) => x.key !== l.key))}>הסר</button>
+            </div>
+          ) : (
+            <div className={`line ${l.mark ?? ''}`}>
+              <div className="line-head">
+                <span dir="ltr" className="text">{l.read}</span>
+                <span className="marks">
+                  <button className={l.mark === 'correct' ? 'ok on' : 'ok'} onClick={() => update(l.key, { mark: 'correct' })} aria-label="נכון">✓</button>
+                  <button className={l.mark === 'wrong' ? 'bad on' : 'bad'} onClick={() => update(l.key, { mark: 'wrong' })} aria-label="לא נכון">✗</button>
+                </span>
+              </div>
+              <span className="meta">
+                {Math.round((l.confidence ?? 0) * 100)}% · {l.frames} פריימים · הסכמה {Math.round((l.agreement ?? 0) * 100)}%
+              </span>
+              {l.mark === 'wrong' && (
+                <input dir="ltr" placeholder="מה כתוב באמת (לא חובה)" value={l.actual} onChange={(e) => update(l.key, { actual: e.target.value })} />
+              )}
+            </div>
+          )}
+          <AddLine onClick={() => addMissed(i)} />
+        </div>
+      ))}
 
       <div className="scenes">
         {SCENES.map((s) => (
@@ -375,22 +432,24 @@ function Report({
       </label>
 
       <div className="actions">
-        <button
-          className="big"
-          disabled={!outcome || saving}
-          onClick={() => {
-            setSaving(true)
-            localStorage.setItem('last-scene', JSON.stringify(scene))
-            onSave({ outcome: outcome!, chosen: outcome === 'not_read' ? '' : chosen, actual, scene, notes })
-          }}
-        >
+        {!ready && <p className="hint">סמן ✓ או ✗ בכל שורה כדי לשמור</p>}
+        <button className="big" disabled={!ready || saving} onClick={save}>
           שמור וסרוק הבא
         </button>
+        {!readLines.length && !missedLines.length && <p className="hint">אפשר להוסיף עם + את מה שהיה כתוב</p>}
         <button className="link" onClick={onCancel}>
           זרוק את הסריקה
         </button>
       </div>
     </main>
+  )
+}
+
+function AddLine({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="add-line" onClick={onClick} aria-label="הוסף שורה שפוספסה כאן">
+      + שורה שפוספסה
+    </button>
   )
 }
 
@@ -476,7 +535,7 @@ function Log({ scans, onSync, onBack }: { scans: StoredScan[]; onSync: () => voi
       <ul>
         {scans.map((s) => (
           <li key={s.record.id}>
-            <b>{label[s.record.outcome]}</b> <span dir="ltr">{s.record.chosen || s.record.actual || '—'}</span>{' '}
+            <b>{label[s.record.outcome]}</b> <span dir="ltr">{s.record.summary || '—'}</span>{' '}
             <span className="meta">
               {new Date(s.record.createdAt).toLocaleTimeString('he-IL')} · {s.record.setup} ·{' '}
               {s.synced ? 'נשלח' : s.syncError ? `לא נשלח: ${s.syncError}` : 'ממתין'}

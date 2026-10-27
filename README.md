@@ -21,12 +21,14 @@ Google Sheet, so failures can be studied. Open it on the phone: https://israelei
 
 ## The report
 
-After a scan: tap the read you mean, then ✓ right, ✗ wrong, or "not read"; optionally type what is really written,
-tick the scene (day, night, glare, far…), and save. Scans are kept on the phone and sent when the script is set up and
+After a scan, every line read is listed top to bottom: mark each one ✓ or ✗ (for ✗, optionally type what is really
+written). "+ שורה שפוספסה" adds, at that place in the list, a line the scan missed. Tick the scene (day, night, glare,
+far…) and save. A scan counts as correct only when every line is ✓ and none was missed. Scans are kept on the phone and sent when the script is set up and
 the network is up; "הורד CSV" on the log screen downloads them as a file.
 
-Each row in the sheet has: the outcome, the chosen read, the real text, every voted read with confidence, frames and
-agreement, the boxes of the kept frame, frames read and frames rejected as blurred, sharpness, time to result,
+The `lines` tab has one row per line: scan id, position (1 is the top), what was read, what is really written,
+✓/✗/missed, confidence, frames and agreement. The `scans` tab has one row per scan: the outcome, all the lines read in
+one cell, the boxes of the kept frame, frames read and frames rejected as blurred, sharpness, time to result,
 settings, scene, notes, camera resolution and supported controls, device, and links to the original and the
 processed image.
 
