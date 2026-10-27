@@ -1,0 +1,123 @@
+// Scans are kept on the phone (IndexedDB) and sent to the Apps Script web app when it is set up
+// and the network is up. A scan is marked sent only after the script confirms it.
+
+export type Outcome = 'correct' | 'wrong' | 'not_read'
+
+export interface ScanRecord {
+  id: string
+  createdAt: string
+  tester: string
+  setup: string
+  preprocess: boolean
+  hardware: boolean
+  voting: boolean
+  torch: boolean
+  zoom: number | null
+  voteFrames: number
+  blurThreshold: number
+  detLimit: number
+  minConfidence: number
+  outcome: Outcome
+  /** The read the outcome is about. */
+  chosen: string
+  /** What is really written, typed by the tester (optional). */
+  actual: string
+  reads: { text: string; confidence: number; frames: number; agreement: number }[]
+  /** The single frame kept as the image, with each read and its box (pixels of that image). */
+  frameReads: { text: string; confidence: number; box: { x: number; y: number; w: number; h: number } }[]
+  framesRead: number
+  framesBlurry: number
+  sharpness: number
+  timeToResultMs: number | null
+  modelLoadMs: number
+  scene: string[]
+  notes: string
+  device: string
+  resolution: string
+  cameraSupports: string[]
+  hardwareApplied: string[]
+  appVersion: string
+}
+
+export interface StoredScan {
+  record: ScanRecord
+  original: Blob
+  processed: Blob | null
+  synced: boolean
+  syncError?: string
+}
+
+const DB = 'scanner'
+const STORE = 'scans'
+
+function db(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB, 1)
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'record.id' })
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  const d = await db()
+  return new Promise((resolve, reject) => {
+    const req = fn(d.transaction(STORE, mode).objectStore(STORE))
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export const putScan = (s: StoredScan) => tx('readwrite', (st) => st.put(s))
+export const allScans = () => tx<StoredScan[]>('readonly', (st) => st.getAll())
+export const clearScans = () => tx('readwrite', (st) => st.clear())
+
+function toBase64(b: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).split(',')[1] ?? '')
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(b)
+  })
+}
+
+let syncing = false
+
+/** Sends every scan not yet sent. Returns how many are still waiting. */
+export async function syncPending(url: string, key: string): Promise<number> {
+  const pending = (await allScans()).filter((s) => !s.synced)
+  if (!url || syncing || !navigator.onLine) return pending.length
+  syncing = true
+  let left = pending.length
+  try {
+    for (const s of pending) {
+      try {
+        const body = JSON.stringify({
+          key,
+          record: s.record,
+          original: await toBase64(s.original),
+          processed: s.processed ? await toBase64(s.processed) : '',
+        })
+        // text/plain keeps this a "simple" request: Apps Script cannot answer a CORS preflight.
+        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body })
+        const out = await res.json()
+        if (!out.ok) throw new Error(out.error ?? 'script error')
+        await putScan({ ...s, synced: true, syncError: undefined })
+        left--
+      } catch (e) {
+        await putScan({ ...s, syncError: String(e) })
+        break
+      }
+    }
+  } finally {
+    syncing = false
+  }
+  return left
+}
+
+/** Checks the URL and key without saving anything. */
+export async function testConnection(url: string, key: string): Promise<string> {
+  const res = await fetch(`${url}?key=${encodeURIComponent(key)}`)
+  const out = await res.json()
+  return out.ok ? `מחובר: ${out.sheet}` : `שגיאה: ${out.error}`
+}
