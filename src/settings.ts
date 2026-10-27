@@ -23,6 +23,8 @@ export interface Settings {
   focusSweep: boolean
   /** Run the models on the graphics processor (WebGPU) where the browser offers it. */
   gpu: boolean
+  /** Continuous scanning: a line read with less confidence is not counted (logos, marks). */
+  minLineConfidence: number
   /** Mark ✓/✗ on the phone after each scan; off: everything is sent unmarked and checked later. */
   review: boolean
   /** Continuous scanning: a line read with at least this confidence counts at once (no second frame). */
@@ -55,6 +57,7 @@ export const defaults: Settings = {
   focusSettleFrames: 1,
   fastConfidence: 0.97,
   review: false,
+  minLineConfidence: 0.75,
   gpu: false,
   viewZoom: 2,
   mode: 'single',

@@ -67,6 +67,8 @@ export interface FrameLog {
   boxes?: number
   recs?: number
   reads?: string[]
+  /** Confidence of each read, same order. */
+  conf?: number[]
   /** Reads left out because they were cut by the side of the aiming box. */
   cut?: string[]
 }
@@ -225,7 +227,7 @@ export async function runScan(
     const cut = allReads.filter((r) => !frameReads.includes(r)).map((r) => r.text)
     framesRead++
     sharpSum += sharp
-    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: frameReads.map((r) => r.text), cut })
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: frameReads.map((r) => r.text), conf: frameReads.map((r) => Math.round(r.confidence * 100) / 100), cut })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: frameReads, region, scale })
     if (frameReads.length) {
       framesWithText++

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isRetake, key, LabelTracker, mergeOrder, words } from './continuous'
+import { isRetake, key, LabelTracker, mergeOrder, sameShape, words } from './continuous'
 
 describe('LabelTracker', () => {
   it('starts a label once its lines are read the same way in two recent frames', () => {
@@ -105,6 +105,21 @@ describe('LabelTracker with lines read in pieces', () => {
     feed(t, ['X1404ZA-NK', 'CN:MNN2'])
     feed(t, ['X1404ZA-NK101', 'CN:MNN2'])
     expect(t.current).toEqual([key('X1404ZA-NK101'), key('CN:MNN2')])
+  })
+})
+
+describe('LabelTracker while the phone moves along one label', () => {
+  it('a date coming into view as the serial leaves is the same label', () => {
+    const t = new LabelTracker(2)
+    const feed = (lines: string[]) => t.feed(lines.map((text) => ({ text, confidence: 0.99 })), 0.97)
+    feed(['X1404ZA-NK101', '12M'])
+    expect(feed(['MFD:2023-04', '12M']).started).toBe(false)
+    expect(t.current).toContain(key('MFD:2023-04'))
+  })
+
+  it('serials of one shape are told apart, a date is another shape', () => {
+    expect(sameShape(key('SN A7310592'), key('SN A7310593'))).toBe(true)
+    expect(sameShape(key('X1404ZA-NK101'), key('MFD:2023-04'))).toBe(false)
   })
 })
 

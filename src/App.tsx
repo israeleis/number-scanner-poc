@@ -209,7 +209,7 @@ export default function App() {
         )
         scanned = {
           reads: run.captures.flatMap((c) =>
-            c.lines.map((text) => ({ text, confidence: c.confidence, frames: 0, agreement: 1, x: 0, y: 0, h: 0 })),
+            c.lines.map((text, i) => ({ text, confidence: c.conf[i] ?? c.confidence, frames: 0, agreement: 1, x: 0, y: 0, h: 0 })),
           ),
           original: run.last ?? grab(video, frameRegion(video, settings)),
           processed: null,
@@ -883,6 +883,12 @@ function SettingsScreen({
         value={s.fastConfidence}
         step={0.01}
         set={(n) => setSettings({ ...s, fastConfidence: n })}
+      />
+      <NumberField
+        label="סריקה רציפה: ביטחון מינימלי לשורה (0-1; מתחת לזה לא נקלטת, כמו לוגו)"
+        value={s.minLineConfidence}
+        step={0.05}
+        set={(n) => setSettings({ ...s, minLineConfidence: n })}
       />
       <NumberField label="זמן מקסימלי לסריקה (שניות)" value={s.timeoutSec} set={(n) => setSettings({ ...s, timeoutSec: n })} />
       <NumberField label="תיקון חשיפה (כשבקרת מצלמה פועלת)" value={s.exposureComp} step={0.5} set={(n) => setSettings({ ...s, exposureComp: n })} />

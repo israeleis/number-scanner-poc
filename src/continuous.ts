@@ -22,6 +22,8 @@ export interface Capture {
   lines: string[]
   /** Per line: taken from one frame on high confidence (not confirmed by a second frame). */
   fast: boolean[]
+  /** Per line: the best confidence it was read with. */
+  conf: number[]
   /** Average confidence of the lines' reads. */
   confidence: number
   /** Time since the start of the run when the label was first written down. */
@@ -49,6 +51,10 @@ export const key = (t: string) =>
  */
 const sameLine = (a: string, b: string) =>
   a === b || (Math.min(a.length, b.length) >= 3 && (a.includes(b) || b.includes(a)))
+/** Letters as A and digits as 9: "SN A7310592" and "SN A7310593" have one shape, a date another. */
+const shape = (t: string) => t.replace(/[0-9]/g, '9').replace(/[A-Z]/g, 'A')
+export const sameShape = (a: string, b: string) =>
+  Math.abs(a.length - b.length) <= 2 && levenshtein(shape(a), shape(b)) <= 2
 const isIdentity = (t: string) => (t.match(/[0-9]/g) ?? []).length >= 4
 
 /**
@@ -100,8 +106,8 @@ export interface TrackerUpdate {
  * of the last `window` frames. The steady lines belong to the current label, until:
  * - no steady line was seen for `gap` frames (the camera moved off the label), or
  * - fewer than half of the steady lines are in the current label (another label), or
- * - a new number of 4+ digits appears and none of the label's own numbers is still in view (same
- *   kind of label, different serial).
+ * - a new number of 4+ digits, shaped like one of the label's numbers, appears while none of the
+ *   label's own numbers is still in view (same kind of label, different serial).
  * Then the next steady lines start a new label. Exact sameness, not similarity: neighbouring
  * serials differ by one character.
  */
@@ -145,11 +151,13 @@ export class LabelTracker {
     const inLabel = (k: string) => cur !== null && cur.some((c) => sameLine(c, k))
     const known = steady.filter(inLabel).length
     // A new number while none of the label's numbers is in view any more: the next label.
+    // A new number shaped like one of the label's numbers (same run of letters and digits), while
+    // none of the label's numbers is in view any more: the next label of the same kind. A number of
+    // another shape (a date coming into view as the phone moves along the label) is the same label.
     const newIdentity =
       cur !== null &&
-      cur.some(isIdentity) &&
-      steady.some((k) => isIdentity(k) && !inLabel(k)) &&
-      !steady.some((k) => isIdentity(k) && inLabel(k))
+      !steady.some((k) => isIdentity(k) && inLabel(k)) &&
+      steady.some((k) => isIdentity(k) && !inLabel(k) && cur.some((c) => isIdentity(c) && sameShape(c, k)))
     if (!cur || known < steady.length / 2 || newIdentity) {
       this.current = steady
       // Lines seen before the switch must be seen again to count for the new label.
@@ -220,6 +228,8 @@ export async function runContinuous(
 ): Promise<ContinuousResult> {
   const start = performance.now()
   const tracker = new LabelTracker(s.voting ? 2 : 1)
+  /** The best confidence each line was read with during the run. */
+  const lineConf = new Map<string, number>()
   /** When a label was last in view, and how many retakes were merged into the label before. */
   let lastSeen = -Infinity
   let merged = 0
@@ -273,13 +283,17 @@ export async function runContinuous(
     const cut = allReads.filter((r) => !reads.includes(r)).map((r) => r.text)
     framesRead++
     sharpSum += sharp
-    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: reads.map((r) => r.text), cut })
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: reads.map((r) => r.text), conf: reads.map((r) => Math.round(r.confidence * 100) / 100), cut })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: reads, region, scale: frame.width / region.w })
-    const update = tracker.feed(reads, s.fastConfidence)
+    // Logos and marks (CE, FCC) come out as short low-confidence "words": not counted as lines.
+    const sure = reads.filter((r) => r.confidence >= s.minLineConfidence)
+    for (const r of sure) lineConf.set(key(r.text), Math.max(lineConf.get(key(r.text)) ?? 0, r.confidence))
+    const update = tracker.feed(sure, s.fastConfidence)
     if (tracker.current) lastSeen = performance.now()
     if (update.added.length && tracker.current) {
       const lines = tracker.current
-      const inLabel = reads.filter((r) => lines.includes(key(r.text)))
+      const inLabel = sure.filter((r) => lines.includes(key(r.text)))
+      const conf = lines.map((k) => Math.round((lineConf.get(k) ?? 0) * 1000) / 1000)
       // Show each line as it was read (not the upper-case key used for comparing).
       const shown = lines.map((k) => reads.find((r) => key(r.text) === k)?.text ?? k)
       const confidence = inLabel.reduce((a, r) => a + r.confidence, 0) / Math.max(1, inLabel.length)
@@ -292,12 +306,13 @@ export async function runContinuous(
           prev.lines = shown
           prev.fast = lines.map((k) => tracker.fast.has(k))
           prev.confidence = confidence
+          prev.conf = conf
           prev.crop = crop
         }
         onCapture(prev, false)
       } else if (update.started) {
         const fast = lines.map((k) => tracker.fast.has(k))
-        const c: Capture = { lines: shown, fast, confidence, atMs: Math.round(performance.now() - start), crop }
+        const c: Capture = { lines: shown, fast, conf, confidence, atMs: Math.round(performance.now() - start), crop }
         captures.push(c)
         onCapture(c, true)
       } else {
@@ -305,6 +320,7 @@ export async function runContinuous(
         c.lines = shown
         c.fast = lines.map((k) => tracker.fast.has(k))
         c.confidence = confidence
+        c.conf = conf
         c.crop = crop
         onCapture(c, false)
       }
