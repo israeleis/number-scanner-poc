@@ -94,10 +94,13 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png}'],
+        // The graphics processor's runtime is fetched in the background only where WebGPU exists.
+        globIgnores: ['**/ort.webgpu*'],
         // The models and the runtime are large: cached on first use instead of at install.
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname.includes('/models/') || url.pathname.includes('/ort/'),
+            urlPattern: ({ url }) =>
+              url.pathname.includes('/models/') || url.pathname.includes('/ort/') || url.pathname.includes('ort.webgpu'),
             handler: 'CacheFirst',
             options: { cacheName: 'ocr-models', expiration: { maxEntries: 10 } },
           },

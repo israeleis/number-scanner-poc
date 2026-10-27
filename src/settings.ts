@@ -21,7 +21,10 @@ export interface Settings {
   cameraId: string
   /** Search for the sharpest focus when a scan starts (phones that let the site move the lens). */
   focusSweep: boolean
-  /** Run the models on the graphics processor (WebGPU) where the browser offers it. */
+  /**
+   * Run the models on the graphics processor (WebGPU) where the browser offers it: prepared in the
+   * background after the app starts on the main processor; never downloaded without WebGPU.
+   */
   gpu: boolean
   /** Continuous scanning: a line read with less confidence is not counted (logos, marks). */
   minLineConfidence: number
@@ -58,7 +61,7 @@ export const defaults: Settings = {
   fastConfidence: 0.97,
   review: false,
   minLineConfidence: 0.75,
-  gpu: false,
+  gpu: true,
   viewZoom: 2,
   mode: 'single',
 }
@@ -68,11 +71,12 @@ const KEY = 'scanner-settings'
  * Raised when a default changes that saved settings should take: values saved by an older version
  * for the keys below are replaced by the new defaults once.
  */
-const VERSION = 4
+const VERSION = 5
 const RESET_IN: Record<number, (keyof Settings)[]> = {
   2: ['blurThreshold', 'cameraHeight'],
   3: ['detLimit'],
   4: ['focusSweep', 'fastConfidence'],
+  5: ['gpu'],
 }
 
 export function loadSettings(): Settings {

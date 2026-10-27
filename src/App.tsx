@@ -17,7 +17,7 @@ import {
   type CameraChoice,
   type FocusSweep,
 } from './camera'
-import { boxCorners, loadEngine, type Engine } from './ocr/engine'
+import { boxCorners, hasWebGpu, loadEngine, type Engine } from './ocr/engine'
 import { runContinuous, signal, words, type Capture } from './continuous'
 import { AIM_H, AIM_W, displayScale, grab, frameRegion, runScan, type ScanProgress, type ScanResult } from './scanner'
 import { loadSettings, saveSettings, setupName, type Settings } from './settings'
@@ -82,13 +82,31 @@ export default function App() {
     refreshScans()
   }, [refreshScans])
 
-  // The models load for the main processor or the graphics processor, as the switch says.
+  // The app starts on the main processor, which loads quickly. With the switch on, and only if the
+  // browser offers WebGPU, the graphics processor's runtime is then downloaded and prepared in the
+  // background; the next scan after it is ready uses it. A scan already running keeps its engine.
+  const [gpuState, setGpuState] = useState<'off' | 'checking' | 'unsupported' | 'preparing' | 'ready' | 'failed'>('off')
   useEffect(() => {
     let cancelled = false
-    setEngine(null)
     setEngineError('')
-    loadEngine(settings.gpu).then(
-      (e) => !cancelled && setEngine(e),
+    loadEngine(false).then(
+      async (main) => {
+        if (cancelled) return
+        setEngine(main)
+        if (!settings.gpu) return setGpuState('off')
+        setGpuState('checking')
+        if (!(await hasWebGpu())) return !cancelled && setGpuState('unsupported')
+        if (cancelled) return
+        setGpuState('preparing')
+        loadEngine(true).then(
+          (gpu) => {
+            if (cancelled) return
+            setEngine(gpu)
+            setGpuState(gpu.backend === 'webgpu' ? 'ready' : 'failed')
+          },
+          () => !cancelled && setGpuState('failed'),
+        )
+      },
       (e) => !cancelled && setEngineError(String(e)),
     )
     return () => {
@@ -367,12 +385,19 @@ export default function App() {
           )}
           {engineError && <p className="error">המודל לא נטען: {engineError}</p>}
           {!engine && !engineError && (
-            <p className="hint">
-              {settings.gpu ? 'מכין את המעבד הגרפי…' : 'טוען את מודל הזיהוי…'} (רק בפעם הראשונה זה לוקח זמן)
-            </p>
+            <p className="hint">טוען את מודל הזיהוי… (רק בפעם הראשונה זה לוקח זמן)</p>
           )}
-          {engine && settings.gpu && engine.backend !== 'webgpu' && (
-            <p className="hint">הטלפון לא מאפשר מעבד גרפי לאתרים: הזיהוי רץ על המעבד הרגיל.</p>
+          {settings.gpu && gpuState !== 'ready' && gpuState !== 'off' && (
+            <p className="hint">
+              {
+                {
+                  checking: 'בודק אם יש מעבד גרפי…',
+                  preparing: 'מכין את המעבד הגרפי ברקע; בינתיים הזיהוי רץ על המעבד הרגיל.',
+                  unsupported: 'הטלפון לא מאפשר מעבד גרפי לאתרים: הזיהוי רץ על המעבד הרגיל.',
+                  failed: 'המעבד הגרפי לא עלה: הזיהוי רץ על המעבד הרגיל.',
+                }[gpuState]
+              }
+            </p>
           )}
 
           <div className="toggles">

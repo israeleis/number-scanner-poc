@@ -59,7 +59,8 @@ export function loadEngine(gpu = false): Promise<Engine> {
   return loading.get(gpu)!
 }
 
-async function hasWebGpu(): Promise<boolean> {
+/** A quick check (no download): does this browser offer a usable graphics processor? */
+export async function hasWebGpu(): Promise<boolean> {
   const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu
   try {
     return !!gpu && !!(await gpu.requestAdapter())
