@@ -21,6 +21,8 @@ export interface Settings {
   cameraId: string
   /** Search for the sharpest focus when a scan starts (phones that let the site move the lens). */
   focusSweep: boolean
+  /** Camera frames to wait after moving the lens before measuring (one frame is about 33 ms). */
+  focusSettleFrames: number
   /** The app's own magnification of the picture (1-4): only the middle is shown and read. */
   viewZoom: number
   /** single: one scan, then the report. continuous: keeps reading and writes down every new text. */
@@ -34,7 +36,7 @@ export const defaults: Settings = {
   hardware: true,
   voting: true,
   voteFrames: 3,
-  blurThreshold: 40,
+  blurThreshold: 20,
   exposureComp: 0,
   detLimit: 960,
   minConfidence: 0.5,
@@ -44,22 +46,33 @@ export const defaults: Settings = {
   cameraHeight: 2160,
   cameraId: '',
   focusSweep: true,
+  focusSettleFrames: 1,
   viewZoom: 2,
   mode: 'single',
 }
 
 const KEY = 'scanner-settings'
+/**
+ * Raised when a default changes that saved settings should take: values saved by an older version
+ * for the keys below are replaced by the new defaults once.
+ */
+const VERSION = 2
+const RESET_IN: Record<number, (keyof Settings)[]> = { 2: ['blurThreshold', 'cameraHeight'] }
 
 export function loadSettings(): Settings {
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }
+    const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}')
+    const from = saved.version ?? 1
+    for (let v = from + 1; v <= VERSION; v++) for (const k of RESET_IN[v] ?? []) delete saved[k]
+    delete saved.version
+    return { ...defaults, ...saved }
   } catch {
     return defaults
   }
 }
 
 export function saveSettings(s: Settings) {
-  localStorage.setItem(KEY, JSON.stringify(s))
+  localStorage.setItem(KEY, JSON.stringify({ ...s, version: VERSION }))
 }
 
 /** Short name of the active combination, e.g. "P1 H0 V1 F1 T1". Torch is part of it. */

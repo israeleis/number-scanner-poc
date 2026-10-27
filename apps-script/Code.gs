@@ -13,8 +13,8 @@ const COLUMNS = [
 ]
 
 const LINE_COLUMNS = [
-  'scanId', 'createdAt', 'tester', 'setup', 'line', 'read', 'actual', 'outcome', 'confidence', 'frames',
-  'agreement', 'atMs', 'image', 'scene',
+  'scanId', 'createdAt', 'tester', 'setup', 'item', 'line', 'read', 'words', 'actual', 'outcome', 'confidence',
+  'frames', 'agreement', 'atMs', 'image', 'scene',
 ]
 
 function doGet(e) {
@@ -49,8 +49,8 @@ function doPost(e) {
       return typeof v === 'object' ? JSON.stringify(v) : v
     }))
     const rows = (r.lines || []).map(function (l) {
-      return [r.id, r.createdAt, r.tester, r.setup, l.line, l.read, l.actual, l.outcome,
-        l.confidence === null ? '' : l.confidence, l.frames === null ? '' : l.frames,
+      return [r.id, r.createdAt, r.tester, r.setup, blank(l.item), l.line, l.read, JSON.stringify(l.words || []),
+        l.actual, l.outcome, l.confidence === null ? '' : l.confidence, l.frames === null ? '' : l.frames,
         l.agreement === null ? '' : l.agreement, l.atMs === null || l.atMs === undefined ? '' : l.atMs,
         l.crop === null || l.crop === undefined ? '' : (cropUrls[l.crop] || ''), (r.scene || []).join(', ')]
     })
@@ -59,6 +59,10 @@ function doPost(e) {
   } finally {
     lock.releaseLock()
   }
+}
+
+function blank(v) {
+  return v === null || v === undefined ? '' : v
 }
 
 function sheetWithHeader(ss, name, columns) {

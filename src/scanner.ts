@@ -69,19 +69,19 @@ export interface ScanResult {
   timeToResultMs: number | null
   /** Focus searches made during the scan, in order. */
   sweeps: FocusSweep[]
-  /** Continuous scanning only: per read, its picture and when it was written down. */
-  captures?: { crop: HTMLCanvasElement; atMs: number }[]
+  /** Continuous scanning only: per read, its label (index), the label's picture, and when it was written down. */
+  captures?: { crop: HTMLCanvasElement; atMs: number; item: number }[]
   durationMs?: number
 }
 
 const MAX_SIDE = 1280
 
-export function frameScale(r: Region) {
-  return Math.min(1, MAX_SIDE / Math.max(r.w, r.h))
+export function frameScale(r: Region, maxSide = MAX_SIDE) {
+  return Math.min(1, maxSide / Math.max(r.w, r.h))
 }
 
-export function grab(video: HTMLVideoElement, r: Region): HTMLCanvasElement {
-  const scale = frameScale(r)
+export function grab(video: HTMLVideoElement, r: Region, maxSide = MAX_SIDE): HTMLCanvasElement {
+  const scale = frameScale(r, maxSide)
   const c = document.createElement('canvas')
   c.width = Math.round(r.w * scale)
   c.height = Math.round(r.h * scale)
@@ -94,6 +94,11 @@ export function frameRegion(video: HTMLVideoElement, s: Settings): Region {
   if (!video.clientWidth) return { x: 0, y: 0, w: video.videoWidth, h: video.videoHeight }
   const [fw, fh] = s.aimBox ? [AIM_W, AIM_H] : [1, 1]
   return aimRegion(video.videoWidth, video.videoHeight, video.clientWidth, video.clientHeight, fw, fh, s.viewZoom)
+}
+
+/** Sharpness of the aiming box for focusing: grabbed small (640 pixels), which is quick. */
+export function focusSharpness(video: HTMLVideoElement, s: Settings): number {
+  return sharpnessOf(grab(video, frameRegion(video, s), 640), 640)
 }
 
 /** Sharpness of the middle of the frame, measured on a copy `w` pixels wide. */
@@ -132,7 +137,7 @@ export async function runScan(
   const start = performance.now()
   const sweeps: FocusSweep[] = []
   // Focus is judged on the aiming box at a finer scale than the blur gate, since the text is small.
-  const measure = () => sharpnessOf(grab(video, frameRegion(video, s)), 640)
+  const measure = () => focusSharpness(video, s)
   const sweep = async () => {
     if (!focuser) return
     const r = await focuser(measure)
@@ -157,8 +162,8 @@ export async function runScan(
     const sharp = sharpnessOf(frame)
     if (sharp < s.blurThreshold) {
       framesBlurry++
-      // Still blurred after a few frames: the phone or the text moved. Search again (twice at most).
-      if (s.focusSweep && ++blurryInARow >= 4 && sweeps.length < 3) {
+      // Still blurred: the phone or the text moved. Search again (a few times at most).
+      if (s.focusSweep && ++blurryInARow >= 2 && sweeps.length < 5) {
         blurryInARow = 0
         await sweep()
       }

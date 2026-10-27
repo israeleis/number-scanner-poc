@@ -7,9 +7,9 @@ import {
   probeCameras,
   saveProbe,
   canSweepFocus,
+  FocusSearch,
   setFocus,
   setHardware,
-  sweepFocus,
   setTorch,
   supportedList,
   trackResolution,
@@ -17,7 +17,7 @@ import {
   type CameraChoice,
 } from './camera'
 import { boxCorners, loadEngine, type Engine } from './ocr/engine'
-import { runContinuous, signal, type Capture } from './continuous'
+import { runContinuous, signal, words, type Capture } from './continuous'
 import { AIM_H, AIM_W, displayScale, grab, frameRegion, runScan, type ScanProgress, type ScanResult } from './scanner'
 import { loadSettings, saveSettings, setupName, type Settings } from './settings'
 import { allScans, putScan, syncPending, testConnection, type Line, type Outcome, type StoredScan } from './store'
@@ -132,14 +132,30 @@ export default function App() {
   const setup = setupName({ ...settings, focusSweep: sweeping }, torch)
   const setupCount = scans.filter((s) => s.record.setup === setup).length
 
+  /** One focus search per open camera, so it remembers the last good focus between scans. */
+  const focusRef = useRef<{ track: MediaStreamTrack; frames: number; search: FocusSearch } | null>(null)
+  function focusSearch(): FocusSearch | null {
+    const video = videoRef.current
+    if (!track || !video || !canSweepFocus(caps)) return null
+    const frames = settings.focusSettleFrames
+    if (focusRef.current?.track !== track || focusRef.current.frames !== frames) {
+      const waitFrame = () =>
+        new Promise<void>((r) =>
+          'requestVideoFrameCallback' in video ? video.requestVideoFrameCallback(() => r()) : setTimeout(r, 33),
+        )
+      focusRef.current = { track, frames, search: new FocusSearch(track, waitFrame, frames) }
+    }
+    return focusRef.current.search
+  }
+
   async function startScan() {
     if (!engine || !videoRef.current || scanning) return
     stopRef.current = { stopped: false }
     setScanning(true)
     setProgress(null)
     try {
-      const t = track
-      const focuser = t && canSweepFocus(caps) ? (measure: () => number) => sweepFocus(t, measure) : null
+      const search = focusSearch()
+      const focuser = search ? (measure: () => number) => search.find(measure) : null
       if (settings.mode === 'continuous') {
         // Sound may only start from a tap, so the audio is set up here.
         audioRef.current ??= new AudioContext()
@@ -150,16 +166,23 @@ export default function App() {
           video,
           engine,
           settings,
-          (c) => {
-            signal(audioRef.current)
-            setLive((l) => [c, ...l])
+          (c, started) => {
+            if (started) {
+              signal(audioRef.current)
+              setLive((l) => [c, ...l])
+            } else {
+              // Lines added to the current label: show them (same object, new array to re-render).
+              setLive((l) => [...l])
+            }
           },
           setProgress,
           stopRef.current,
           focuser,
         )
         setResult({
-          reads: run.captures.map((c) => ({ text: c.text, confidence: c.confidence, frames: c.frames, agreement: 1, x: 0, y: 0, h: 0 })),
+          reads: run.captures.flatMap((c) =>
+            c.lines.map((text) => ({ text, confidence: c.confidence, frames: 0, agreement: 1, x: 0, y: 0, h: 0 })),
+          ),
           original: run.last ?? grab(video, frameRegion(video, settings)),
           processed: null,
           frameReads: [],
@@ -168,7 +191,7 @@ export default function App() {
           sharpness: run.sharpness,
           timeToResultMs: null,
           sweeps: run.sweeps,
-          captures: run.captures.map((c) => ({ crop: c.crop, atMs: c.atMs })),
+          captures: run.captures.flatMap((c, item) => c.lines.map(() => ({ crop: c.crop, atMs: c.atMs, item }))),
           durationMs: run.durationMs,
         })
       } else {
@@ -234,7 +257,12 @@ export default function App() {
       record,
       original: await toBlob(result.original),
       processed: result.processed ? await toBlob(result.processed) : null,
-      crops: result.captures ? await Promise.all(result.captures.map((c) => toBlob(c.crop))) : undefined,
+      // One picture per label (the lines of a label share it).
+      crops: result.captures
+        ? await Promise.all(
+            result.captures.filter((c, i, all) => all.findIndex((x) => x.item === c.item) === i).map((c) => toBlob(c.crop)),
+          )
+        : undefined,
       synced: false,
     })
     setResult(null)
@@ -280,7 +308,7 @@ export default function App() {
             {scanning && settings.mode === 'continuous' && live.length > 0 && (
               <div className="last-capture" key={live.length}>
                 <span className="count">{live.length}</span>
-                <span dir="ltr">{live[0].text}</span>
+                <Lines lines={live[0].lines} />
               </div>
             )}
           </div>
@@ -332,7 +360,7 @@ export default function App() {
                 <ol className="live" reversed>
                   {live.map((c, i) => (
                     <li key={live.length - i} className={i === 0 ? 'newest' : ''}>
-                      <span dir="ltr">{c.text}</span>
+                      <Lines lines={c.lines} />
                     </li>
                   ))}
                 </ol>
@@ -374,6 +402,23 @@ export default function App() {
 }
 
 const round = (n: number) => Math.round(n * 1000) / 1000
+
+/** Lines top to bottom, each line's words as separate chips. */
+function Lines({ lines }: { lines: string[] }) {
+  return (
+    <div className="lines" dir="ltr">
+      {lines.map((l, i) => (
+        <div key={i} className="words">
+          {words(l).map((w, j) => (
+            <span key={j} className="word">
+              {w}
+            </span>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function Toggle({ label, on, set }: { label: string; on: boolean; set: (v: boolean) => void }) {
   return (
@@ -432,7 +477,7 @@ interface DraftLine {
   frames: number | null
   agreement: number | null
   atMs: number | null
-  crop: number | null
+  item: number | null
   thumb: string | null
 }
 
@@ -450,8 +495,12 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       frames: r.frames,
       agreement: round(r.agreement),
       atMs: result.captures?.[i].atMs ?? null,
-      crop: result.captures ? i : null,
-      thumb: result.captures?.[i].crop.toDataURL('image/jpeg', 0.8) ?? null,
+      item: result.captures?.[i].item ?? null,
+      // The label's picture is shown once, above its first line.
+      thumb:
+        result.captures && (i === 0 || result.captures[i - 1].item !== result.captures[i].item)
+          ? result.captures[i].crop.toDataURL('image/jpeg', 0.8)
+          : null,
     })),
   )
   const [scene, setScene] = useState<string[]>(() => JSON.parse(localStorage.getItem('last-scene') ?? '[]'))
@@ -490,7 +539,8 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       frames: null,
       agreement: null,
       atMs: null,
-      crop: null,
+      // A missed line belongs to the label of the line above it.
+      item: at >= 0 ? lines[at].item : (lines[0]?.item ?? null),
       thumb: null,
     }
     setLines([...lines.slice(0, at + 1), blank, ...lines.slice(at + 1)])
@@ -511,8 +561,10 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       confidence: l.confidence,
       frames: l.frames,
       agreement: l.agreement,
+      words: words(l.missed ? l.actual.trim() : l.read),
+      item: l.item === null ? null : l.item + 1,
       atMs: l.atMs,
-      crop: l.crop,
+      crop: l.item,
     }))
     const outcome: Outcome = !readLines.length
       ? 'not_read'
@@ -529,7 +581,7 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       <img src={image} alt="הפריים שנקרא" />
       <p className="hint">
         {result.captures
-          ? `${result.captures.length} נקלטו ב־${((result.durationMs ?? 0) / 1000).toFixed(0)} שניות`
+          ? `${new Set(result.captures.map((c) => c.item)).size} תוויות נקלטו ב־${((result.durationMs ?? 0) / 1000).toFixed(0)} שניות`
           : result.timeToResultMs === null
             ? 'לא זוהה בזמן'
             : `תוצאה אחרי ${(result.timeToResultMs / 1000).toFixed(1)} שניות`}{' '}
@@ -547,6 +599,13 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       <AddLine onClick={() => addMissed(-1)} />
       {lines.map((l, i) => (
         <div key={l.key}>
+          {l.thumb && (
+            <div className="label-head">
+              <b>תווית {(l.item ?? 0) + 1}</b>
+              {l.atMs !== null && <span className="meta"> · אחרי {(l.atMs / 1000).toFixed(1)} שנ׳</span>}
+              <img className="thumb" src={l.thumb} alt="" />
+            </div>
+          )}
           {l.missed ? (
             <div className="line missed">
               <span className="tag">שורה שפוספסה</span>
@@ -562,10 +621,10 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
                   <button className={l.mark === 'wrong' ? 'bad on' : 'bad'} onClick={() => update(l.key, { mark: 'wrong' })} aria-label="לא נכון">✗</button>
                 </span>
               </div>
-              {l.thumb && <img className="thumb" src={l.thumb} alt="" />}
+              <Lines lines={[l.read]} />
               <span className="meta">
-                {Math.round((l.confidence ?? 0) * 100)}% · {l.frames} פריימים
-                {l.atMs === null ? ` · הסכמה ${Math.round((l.agreement ?? 0) * 100)}%` : ` · אחרי ${(l.atMs / 1000).toFixed(1)} שנ׳`}
+                {Math.round((l.confidence ?? 0) * 100)}%
+                {l.atMs === null ? ` · ${l.frames} פריימים · הסכמה ${Math.round((l.agreement ?? 0) * 100)}%` : ''}
               </span>
               {l.mark === 'wrong' && (
                 <input dir="ltr" placeholder="מה כתוב באמת (לא חובה)" value={l.actual} onChange={(e) => update(l.key, { actual: e.target.value })} />
@@ -709,6 +768,11 @@ function SettingsScreen({
       <NumberField label="סף טשטוש (פריים מתחת לזה לא נקרא)" value={s.blurThreshold} set={(n) => setSettings({ ...s, blurThreshold: n })} />
       <NumberField label="גודל התמונה לאיתור טקסט (פיקסלים)" value={s.detLimit} step={32} set={(n) => setSettings({ ...s, detLimit: n })} />
       <NumberField label="ביטחון מינימלי (0-1)" value={s.minConfidence} step={0.05} set={(n) => setSettings({ ...s, minConfidence: n })} />
+ <NumberField
+        label="פריימים להמתנה אחרי הזזת העדשה (פריים ≈ 33ms)"
+        value={s.focusSettleFrames}
+        set={(n) => setSettings({ ...s, focusSettleFrames: Math.max(1, Math.round(n)) })}
+      />
       <NumberField label="זמן מקסימלי לסריקה (שניות)" value={s.timeoutSec} set={(n) => setSettings({ ...s, timeoutSec: n })} />
       <NumberField label="תיקון חשיפה (כשבקרת מצלמה פועלת)" value={s.exposureComp} step={0.5} set={(n) => setSettings({ ...s, exposureComp: n })} />
 

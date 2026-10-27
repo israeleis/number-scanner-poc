@@ -15,7 +15,11 @@ export interface Line {
   confidence: number | null
   frames: number | null
   agreement: number | null
-  /** Continuous scanning: when it was written down (ms from the start), and its picture's index. */
+  /** The words of the line, each searchable on its own. */
+  words: string[]
+  /** Continuous scanning: the label it belongs to (1 is the first), when that label was written
+   * down (ms from the start), and the index of the label's picture. */
+  item: number | null
   atMs: number | null
   crop: number | null
 }
@@ -70,7 +74,7 @@ export interface StoredScan {
   record: ScanRecord
   original: Blob
   processed: Blob | null
-  /** Continuous scanning: a picture of each text written down. */
+  /** Continuous scanning: a picture of each label written down. */
   crops?: Blob[]
   synced: boolean
   syncError?: string

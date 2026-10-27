@@ -136,51 +136,105 @@ export interface FocusSweep {
   distance: number
   sharpness: number
   ms: number
+  /** kept: still sharp where it was; climb: from the last good focus; sweep: whole range (first). */
+  kind: 'kept' | 'climb' | 'sweep'
   /** [distance, sharpness] of every step, for studying later. */
   samples: [number, number][]
 }
 
-const settle = () => new Promise((r) => setTimeout(r, 90))
+/** The scanning distance in metres: 3 to 10 cm, or from the closest the camera can focus. */
+export function focusRange(caps: CameraCaps): { near: number; far: number } | null {
+  if (!caps.focusDistance || !canSweepFocus(caps)) return null
+  const near = Math.max(caps.focusDistance.min, 0.03)
+  const far = Math.min(Math.max(0.1, near * 1.5), caps.focusDistance.max)
+  return far > near ? { near, far } : null
+}
 
 /**
- * Finds the sharpest focus by moving the lens and measuring: 7 steps from the nearest the lens
- * can focus (4 cm at the nearest) out to 20 cm, where labels are scanned, then 4 steps around the
- * best one, then locks there. Steps are even in dioptres (1 / distance), so most are close up.
+ * Moves the lens to the sharpest picture. Works in dioptres (1 / distance), where the picture's
+ * sharpness changes evenly. The first search sweeps the range in 6 steps; after that, each search
+ * first checks the last good focus and stops there if the picture is still nearly as sharp;
+ * otherwise it climbs from there: one step one way, keep going while it gets sharper, else try
+ * the other way, then halve the step, down to a sixteenth of the range. After each move it
+ * waits for the next camera frame(s) before measuring.
  */
-export async function sweepFocus(track: MediaStreamTrack, measure: () => number): Promise<FocusSweep | null> {
-  const caps = capabilities(track)
-  if (!caps.focusDistance || !canSweepFocus(caps)) return null
-  const t0 = performance.now()
-  const near = Math.max(caps.focusDistance.min, 0.04)
-  const far = Math.max(near * 1.5, Math.min(caps.focusDistance.max, 0.2))
-  const samples: [number, number][] = []
-  const at = async (dioptre: number) => {
-    const d = Math.min(far, Math.max(near, 1 / dioptre))
-    if (!(await setFocus(track, d))) return -1
-    await settle()
-    const s = measure()
-    samples.push([Math.round(d * 1000) / 1000, Math.round(s)])
-    return s
+export class FocusSearch {
+  private track: MediaStreamTrack
+  private waitFrame: () => Promise<void>
+  private settleFrames: number
+  /** Last good focus, its sharpness, and the way the last climb went. */
+  private last: number | null = null
+  private lastSharp = 0
+  private dir = 1
+
+  constructor(track: MediaStreamTrack, waitFrame: () => Promise<void>, settleFrames = 1) {
+    this.track = track
+    this.waitFrame = waitFrame
+    this.settleFrames = settleFrames
   }
-  const dNear = 1 / near
-  const dFar = 1 / far
-  const step = (dNear - dFar) / 6
-  let best = { dioptre: dNear, sharp: -1 }
-  for (let i = 0; i <= 6; i++) {
-    const dioptre = dNear - i * step
-    const sharp = await at(dioptre)
-    if (sharp > best.sharp) best = { dioptre, sharp }
+
+  async find(measure: () => number): Promise<FocusSweep | null> {
+    const range = focusRange(capabilities(this.track))
+    if (!range) return null
+    const t0 = performance.now()
+    const lo = 1 / range.far
+    const hi = 1 / range.near
+    const span = hi - lo
+    const samples: [number, number][] = []
+    const seen = new Map<number, number>()
+    const at = async (dioptre: number) => {
+      const d = Math.round(Math.min(hi, Math.max(lo, dioptre)) * 100) / 100
+      const known = seen.get(d)
+      if (known !== undefined) return { d, s: known }
+      if (!(await setFocus(this.track, 1 / d))) return { d, s: -1 }
+      for (let i = 0; i < this.settleFrames; i++) await this.waitFrame()
+      const sharp = measure()
+      seen.set(d, sharp)
+      samples.push([Math.round(1000 / d) / 1000, Math.round(sharp)])
+      return { d, s: sharp }
+    }
+
+    const kind = this.last === null ? 'sweep' : 'climb'
+    let best = { d: lo, s: -1 }
+    if (this.last === null) {
+      for (let i = 0; i <= 5; i++) {
+        const r = await at(hi - (i * span) / 5)
+        if (r.s > best.s) best = r
+      }
+    } else {
+      best = await at(this.last)
+      // Still nearly as sharp as when it was found: nothing to search.
+      if (best.s >= 0.85 * this.lastSharp) {
+        return { distance: Math.round(1000 / best.d) / 1000, sharpness: Math.round(best.s), ms: Math.round(performance.now() - t0), kind: 'kept', samples }
+      }
+    }
+    let step = kind === 'sweep' ? span / 10 : span / 4
+    while (step >= span / 16) {
+      for (const dir of [this.dir, -this.dir]) {
+        let r = await at(best.d + dir * step)
+        if (r.s <= best.s) continue
+        // Sharper this way: keep going while it improves.
+        this.dir = dir
+        while (r.s > best.s) {
+          best = r
+          if (best.d <= lo || best.d >= hi) break
+          r = await at(best.d + dir * step)
+        }
+        break
+      }
+      step /= 2
+    }
+    await setFocus(this.track, 1 / best.d)
+    this.last = best.d
+    this.lastSharp = best.s
+    return {
+      distance: Math.round(1000 / best.d) / 1000,
+      sharpness: Math.round(best.s),
+      ms: Math.round(performance.now() - t0),
+      kind,
+      samples,
+    }
   }
-  for (const off of [-0.5, -0.25, 0.25, 0.5]) {
-    const dioptre = best.dioptre + off * step
-    if (dioptre > dNear || dioptre < dFar) continue
-    const sharp = await at(dioptre)
-    if (sharp > best.sharp) best = { dioptre, sharp }
-  }
-  const distance = Math.min(far, Math.max(near, 1 / best.dioptre))
-  await setFocus(track, distance)
-  await settle()
-  return { distance: Math.round(distance * 1000) / 1000, sharpness: Math.round(best.sharp), ms: Math.round(performance.now() - t0), samples }
 }
 
 /**
