@@ -38,7 +38,7 @@ export const defaults: Settings = {
   voteFrames: 3,
   blurThreshold: 20,
   exposureComp: 0,
-  detLimit: 960,
+  detLimit: 640,
   minConfidence: 0.5,
   timeoutSec: 12,
   tester: '',
@@ -56,8 +56,8 @@ const KEY = 'scanner-settings'
  * Raised when a default changes that saved settings should take: values saved by an older version
  * for the keys below are replaced by the new defaults once.
  */
-const VERSION = 2
-const RESET_IN: Record<number, (keyof Settings)[]> = { 2: ['blurThreshold', 'cameraHeight'] }
+const VERSION = 3
+const RESET_IN: Record<number, (keyof Settings)[]> = { 2: ['blurThreshold', 'cameraHeight'], 3: ['detLimit'] }
 
 export function loadSettings(): Settings {
   try {

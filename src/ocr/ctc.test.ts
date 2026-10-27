@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ctcDecode } from './ctc'
-import { boxCorners, dbBoxes } from './engine'
+import { boxCorners, dbBoxes, inTextOrder } from './engine'
 import { laplacianVariance, preprocess } from './imageops'
 
 describe('ctcDecode', () => {
@@ -86,5 +86,35 @@ describe('boxCorners', () => {
       [14, 6],
       [6, 6],
     ])
+  })
+})
+
+describe('inTextOrder', () => {
+  const read = (text: string, cx: number, cy: number, deg: number) => ({
+    text,
+    rotation: deg,
+    box: { cx, cy, thickness: 20, angle: (deg * Math.PI) / 180, length: 200, x: 0, y: 0, w: 0, h: 0, score: 1 },
+  })
+  // A label turned 20 degrees: each next line is 30 px further across the text.
+  const place = (deg: number, line: number, along: number) => {
+    const a = (deg * Math.PI) / 180
+    return [300 + along * Math.cos(a) - line * 30 * Math.sin(a), 300 + along * Math.sin(a) + line * 30 * Math.cos(a)] as const
+  }
+
+  it('orders the lines of a slanted label as they read, not by height on the screen', () => {
+    const lines = ['Contains MT7902', 'FCC ID RAS-MT7902', 'IC 7542A-MT7902', 'R-C-MD6']
+    // Lines start at different places along the text, as on the real label.
+    const reads = lines.map((t, i) => read(t, ...place(20, i, [40, 80, -60, 0][i]), 20))
+    expect(inTextOrder([...reads].reverse()).map((r) => r.text)).toEqual(lines)
+  })
+
+  it('upside-down text reads from the bottom of the screen up', () => {
+    const top = read('second', 300, 100, 180)
+    const bottom = read('first', 300, 200, 180)
+    expect(inTextOrder([top, bottom]).map((r) => r.text)).toEqual(['first', 'second'])
+  })
+
+  it('two words on one row read left to right', () => {
+    expect(inTextOrder([read('B', 300, 101, 0), read('A', 100, 100, 0)]).map((r) => r.text)).toEqual(['A', 'B'])
   })
 })

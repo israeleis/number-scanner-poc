@@ -1,5 +1,5 @@
 // One scan: take frames from the camera until there is a result or time runs out.
-import type { Engine, TextRead } from './ocr/engine'
+import { textAxes, type Engine, type TextRead } from './ocr/engine'
 import { laplacianVariance, preprocess, toGray } from './ocr/imageops'
 import { inReadingOrder, vote, type FrameRead, type VotedRead } from './ocr/vote'
 import type { FocusSweep } from './camera'
@@ -75,7 +75,7 @@ export function logFrame(log: FrameLog[], f: FrameLog) {
 }
 
 /** Moves the lens to the sharpest focus for what is in the aiming box; null when the phone cannot. */
-export type Focuser = (measure: () => number) => Promise<FocusSweep | null>
+export type Focuser = (measure: () => number, force?: boolean) => Promise<FocusSweep | null>
 
 export interface ScanResult {
   reads: VotedRead[]
@@ -153,17 +153,21 @@ export async function runScan(
   onProgress: (p: ScanProgress) => void,
   signal: { stopped: boolean },
   focuser: Focuser | null,
+  onFocus?: (f: FocusSweep) => void,
 ): Promise<ScanResult> {
   const start = performance.now()
   const sweeps: (FocusSweep & { at: number })[] = []
   const frameLog: FrameLog[] = []
   // Focus is judged on the aiming box at a finer scale than the blur gate, since the text is small.
   const measure = () => focusSharpness(video, s)
-  const sweep = async () => {
+  const sweep = async (force = false) => {
     if (!focuser) return
     const at = Math.round(performance.now() - start)
-    const r = await focuser(measure)
-    if (r) sweeps.push({ ...r, at })
+    const r = await focuser(measure, force)
+    if (r) {
+      sweeps.push({ ...r, at })
+      onFocus?.(r)
+    }
   }
   if (s.focusSweep) await sweep()
   let blurryInARow = 0
@@ -189,7 +193,7 @@ export async function runScan(
       // Still blurred: the phone or the text moved. Search again (a few times at most).
       if (s.focusSweep && ++blurryInARow >= 2 && sweeps.length < 5) {
         blurryInARow = 0
-        await sweep()
+        await sweep(true)
       }
       onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: [], region, scale })
       await nextFrame()
@@ -211,15 +215,18 @@ export async function runScan(
     if (frameReads.length) {
       framesWithText++
       const weight = sharp / (sharp + s.blurThreshold)
+      // Positions along and across the text's own lines, so the voted lines keep the label's order.
+      const ax = textAxes(frameReads)
+      const size = Math.max(frame.width, frame.height)
       for (const r of frameReads) {
         reads.push({
           text: r.text,
           confidence: r.confidence,
           weight,
           frame: framesRead,
-          x: (r.box.x + r.box.w / 2) / frame.width,
-          y: (r.box.y + r.box.h / 2) / frame.height,
-          h: r.box.h / frame.height,
+          x: ax.along(r.box) / size,
+          y: ax.across(r.box) / size,
+          h: r.box.thickness / size,
         })
       }
       const score = frameReads.reduce((a, r) => a + r.confidence, 0) * weight

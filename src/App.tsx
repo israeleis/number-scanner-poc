@@ -15,6 +15,7 @@ import {
   trackResolution,
   type CameraCaps,
   type CameraChoice,
+  type FocusSweep,
 } from './camera'
 import { boxCorners, loadEngine, type Engine } from './ocr/engine'
 import { runContinuous, signal, words, type Capture } from './continuous'
@@ -50,6 +51,8 @@ export default function App() {
   /** Texts written down so far in a continuous run, newest first. */
   const [live, setLive] = useState<Capture[]>([])
   const audioRef = useRef<AudioContext | null>(null)
+  /** The last focus search of the running scan, shown to the tester. */
+  const [focusNow, setFocusNow] = useState<FocusSweep | null>(null)
   const [scans, setScans] = useState<StoredScan[]>([])
   const [pending, setPending] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -158,7 +161,8 @@ export default function App() {
     setProgress(null)
     try {
       const search = focusSearch()
-      const focuser = search ? (measure: () => number) => search.find(measure) : null
+      const focuser = search ? (measure: () => number, force?: boolean) => search.find(measure, force) : null
+      setFocusNow(null)
       if (settings.mode === 'continuous') {
         // Sound may only start from a tap, so the audio is set up here.
         audioRef.current ??= new AudioContext()
@@ -181,6 +185,7 @@ export default function App() {
           setProgress,
           stopRef.current,
           focuser,
+          setFocusNow,
         )
         setResult({
           reads: run.captures.flatMap((c) =>
@@ -199,7 +204,7 @@ export default function App() {
           durationMs: run.durationMs,
         })
       } else {
-        setResult(await runScan(videoRef.current, engine, settings, setProgress, stopRef.current, focuser))
+        setResult(await runScan(videoRef.current, engine, settings, setProgress, stopRef.current, focuser, setFocusNow))
       }
       setScreen('report')
     } finally {
@@ -250,7 +255,11 @@ export default function App() {
       resolution: track ? trackResolution(track) : '',
       aimBox: settings.aimBox,
       camera: track?.label ?? '',
-      cameraMinFocus: cameras.find((c) => c.label === track?.label)?.minFocus ?? null,
+      cameraMinFocus: caps.focusDistance?.min ?? null,
+      cameraFocusRange: caps.focusDistance ?? null,
+      cameraId: track?.getSettings().deviceId ?? '',
+      cameraChoice: settings.cameraId ? ('manual' as const) : ('automatic' as const),
+      cameras,
       focusSweep: sweeping,
       focusSweeps: result.sweeps,
       frameLog: result.frameLog,
@@ -358,6 +367,13 @@ export default function App() {
                 {!progress && sweeping ? 'מחפש פוקוס… ' : ''}חדות {Math.round(progress?.sharpness ?? 0)} · נקראו {progress?.framesRead ?? 0} פריימים · מטושטשים{' '}
                 {progress?.framesBlurry ?? 0}
               </p>
+              {focusNow && (
+                <p className={focusNow.distance <= focusNow.near * 1.03 && focusNow.sharpness < 10 ? 'error' : 'hint'}>
+                  פוקוס {(focusNow.distance * 100).toFixed(1)} ס״מ (המצלמה הזו: {(focusNow.near * 100).toFixed(0)}–
+                  {(focusNow.far * 100).toFixed(0)} ס״מ)
+                  {focusNow.distance <= focusNow.near * 1.03 && focusNow.sharpness < 10 ? ' · קרוב מדי: תרחיק את הטלפון' : ''}
+                </p>
+              )}
               <button className="big stop" onClick={() => (stopRef.current.stopped = true)}>
                 {settings.mode === 'continuous' ? `סיים ובדוק (${live.length})` : 'עצור'}
               </button>

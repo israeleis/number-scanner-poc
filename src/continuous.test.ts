@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LabelTracker, words } from './continuous'
+import { LabelTracker, mergeOrder, words } from './continuous'
 
 describe('LabelTracker', () => {
   it('starts a label once its lines are read the same way in two recent frames', () => {
@@ -56,5 +56,14 @@ describe('LabelTracker', () => {
 describe('words', () => {
   it('splits a line into its words', () => {
     expect(words('Tracking No.  2405N22.5')).toEqual(['Tracking', 'No.', '2405N22.5'])
+  })
+})
+
+describe('mergeOrder', () => {
+  it('a line missing from this frame keeps its place', () => {
+    expect(mergeOrder(['CONTAINS', 'FCC ID', 'IC'], ['CONTAINS', 'IC', 'R-C'])).toEqual(['CONTAINS', 'FCC ID', 'IC', 'R-C'])
+  })
+  it('a first line missing from this frame stays first', () => {
+    expect(mergeOrder(['A', 'B'], ['B', 'C'])).toEqual(['A', 'B', 'C'])
   })
 })

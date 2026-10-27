@@ -122,7 +122,7 @@ export class Engine {
       }
     }
     this.last = { detMs: Math.round(t1 - t0), recMs: Math.round(performance.now() - t1), boxes: boxes.length, recs }
-    return reads.sort((a, b) => (Math.abs(a.box.cy - b.box.cy) < a.box.h / 2 ? a.box.cx - b.box.cx : a.box.cy - b.box.cy))
+    return inTextOrder(reads)
   }
 
   private async detect(canvas: HTMLCanvasElement, limit: number): Promise<Box[]> {
@@ -157,6 +157,34 @@ export class Engine {
     const [, steps, classes] = t.dims
     return ctcDecode(t.data as Float32Array, steps, classes, this.dict)
   }
+}
+
+/**
+ * Where each read sits along its text's own lines: `along` (left to right as the text reads) and
+ * `across` (top to bottom as the text reads), using the reads' middle slant. On a slanted label
+ * the next line down can sit higher on the screen than the end of the line above it, so screen
+ * position alone gives the wrong order; upside-down text reads from the bottom of the screen up.
+ */
+export function textAxes(reads: Pick<TextRead, 'box' | 'rotation'>[]) {
+  const rotations = reads.map((r) => (r.rotation * Math.PI) / 180).sort((a, b) => a - b)
+  const a = rotations.length ? rotations[Math.floor(rotations.length / 2)] : 0
+  const ux = Math.cos(a), uy = Math.sin(a)
+  const thick = reads.map((r) => r.box.thickness).sort((x, y) => x - y)
+  return {
+    along: (b: Pick<Box, 'cx' | 'cy'>) => b.cx * ux + b.cy * uy,
+    across: (b: Pick<Box, 'cx' | 'cy'>) => -b.cx * uy + b.cy * ux,
+    /** Lines closer than this across the text are one row. */
+    row: thick.length ? thick[Math.floor(thick.length / 2)] / 2 : 0,
+  }
+}
+
+/** Reads in the order a person reads the label: line by line, each left to right. */
+export function inTextOrder<T extends Pick<TextRead, 'box' | 'rotation'>>(reads: T[]): T[] {
+  const ax = textAxes(reads)
+  return [...reads].sort((p, q) => {
+    const dv = ax.across(p.box) - ax.across(q.box)
+    return Math.abs(dv) < ax.row ? ax.along(p.box) - ax.along(q.box) : dv
+  })
 }
 
 let scratch: HTMLCanvasElement | null = null

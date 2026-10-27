@@ -51,6 +51,13 @@ describe('FocusSearch', () => {
     expect(r!.samples.length).toBe(1)
   })
 
+  it('searches when told the picture is blurred, even if it looks as sharp as before', async () => {
+    const cam = fakeTrack(0.05)
+    const search = new FocusSearch(cam.track, noWait)
+    await search.find(cam.measure)
+    expect((await search.find(cam.measure, true))!.kind).toBe('climb')
+  })
+
   it('stays within 3 to 10 cm', async () => {
     const cam = fakeTrack(0.5)
     const r = await new FocusSearch(cam.track, noWait).find(cam.measure)

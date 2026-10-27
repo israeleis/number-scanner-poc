@@ -138,6 +138,9 @@ export interface FocusSweep {
   ms: number
   /** kept: still sharp where it was; climb: from the last good focus; sweep: whole range (first). */
   kind: 'kept' | 'climb' | 'sweep'
+  /** The scanning range used (metres): the closest the camera focuses, and the far end. */
+  near: number
+  far: number
   /** [distance, sharpness] of every step, for studying later. */
   samples: [number, number][]
 }
@@ -173,7 +176,8 @@ export class FocusSearch {
     this.settleFrames = settleFrames
   }
 
-  async find(measure: () => number): Promise<FocusSweep | null> {
+  /** `force`: the picture is known to be blurred, so the last focus is not kept without a search. */
+  async find(measure: () => number, force = false): Promise<FocusSweep | null> {
     const range = focusRange(capabilities(this.track))
     if (!range) return null
     const t0 = performance.now()
@@ -204,8 +208,16 @@ export class FocusSearch {
     } else {
       best = await at(this.last)
       // Still nearly as sharp as when it was found: nothing to search.
-      if (best.s >= 0.85 * this.lastSharp) {
-        return { distance: Math.round(1000 / best.d) / 1000, sharpness: Math.round(best.s), ms: Math.round(performance.now() - t0), kind: 'kept', samples }
+      if (!force && best.s >= 0.85 * this.lastSharp) {
+        return {
+          distance: Math.round(1000 / best.d) / 1000,
+          sharpness: Math.round(best.s),
+          ms: Math.round(performance.now() - t0),
+          kind: 'kept',
+          near: range.near,
+          far: range.far,
+          samples,
+        }
       }
     }
     let step = kind === 'sweep' ? span / 10 : span / 4
@@ -232,6 +244,8 @@ export class FocusSearch {
       sharpness: Math.round(best.s),
       ms: Math.round(performance.now() - t0),
       kind,
+      near: range.near,
+      far: range.far,
       samples,
     }
   }

@@ -32,6 +32,20 @@ export const words = (line: string) => line.split(/\s+/).filter(Boolean)
 const key = (t: string) => t.toUpperCase().replace(/\s+/g, ' ').trim()
 const isIdentity = (t: string) => (t.match(/[0-9]/g) ?? []).length >= 4
 
+/**
+ * The label's lines in reading order: the order of this frame, with each line not in this frame put
+ * back after the line it followed before (a line missing from one frame keeps its place).
+ */
+export function mergeOrder(before: string[], now: string[]): string[] {
+  const out = [...now]
+  for (const [i, line] of before.entries()) {
+    if (out.includes(line)) continue
+    const prev = before.slice(0, i).reverse().find((p) => out.includes(p))
+    out.splice(prev === undefined ? 0 : out.indexOf(prev) + 1, 0, line)
+  }
+  return out
+}
+
 export interface TrackerUpdate {
   /** A new label was started (beep). */
   started: boolean
@@ -85,10 +99,7 @@ export class LabelTracker {
       return { started: true, added: steady }
     }
     const added = steady.filter((k) => !cur.includes(k))
-    if (added.length) {
-      // Reading order of this frame, then lines of the label not seen in it.
-      this.current = [...steady, ...cur.filter((k) => !steady.includes(k))]
-    }
+    if (added.length) this.current = mergeOrder(cur, steady)
     return { started: false, added }
   }
 }
@@ -140,6 +151,7 @@ export async function runContinuous(
   onProgress: (p: ScanProgress) => void,
   stop: { stopped: boolean },
   focuser: Focuser | null,
+  onFocus?: (f: FocusSweep) => void,
 ): Promise<ContinuousResult> {
   const start = performance.now()
   const tracker = new LabelTracker(s.voting ? 2 : 1)
@@ -147,10 +159,13 @@ export async function runContinuous(
   const sweeps: (FocusSweep & { at: number })[] = []
   const frameLog: FrameLog[] = []
   const measure = () => focusSharpness(video, s)
-  const sweep = async () => {
+  const sweep = async (force = false) => {
     const at = Math.round(performance.now() - start)
-    const r = focuser ? await focuser(measure) : null
-    if (r) sweeps.push({ ...r, at })
+    const r = focuser ? await focuser(measure, force) : null
+    if (r) {
+      sweeps.push({ ...r, at })
+      onFocus?.(r)
+    }
   }
   if (s.focusSweep) await sweep()
   let blurryInARow = 0
@@ -172,7 +187,7 @@ export async function runContinuous(
       // Moving to the next item blurs the picture: look for the focus again (no limit here).
       if (s.focusSweep && ++blurryInARow >= 2) {
         blurryInARow = 0
-        await sweep()
+        await sweep(true)
       }
       await new Promise((r) => setTimeout(r, 30))
       continue

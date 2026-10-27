@@ -62,11 +62,25 @@ export interface ScanRecord {
   /** Only the aiming box was read (the images are of that box only). */
   aimBox: boolean
   camera: string
-  /** The closest that camera can focus, in metres (null: unknown). */
+  /** The closest that camera can focus, in metres (null: unknown), and its whole focus range. */
   cameraMinFocus: number | null
+  cameraFocusRange: { min: number; max: number; step: number } | null
+  cameraId: string
+  cameraChoice: 'manual' | 'automatic'
+  /** Every camera the phone showed, with which way it faces and how close it focuses. */
+  cameras: { deviceId: string; label: string; back: boolean; minFocus: number | null }[]
   focusSweep: boolean
   /** Each focus search: when it started, chosen distance (metres), sharpness, time, and every step. */
-  focusSweeps: { at: number; distance: number; sharpness: number; ms: number; kind: string; samples: [number, number][] }[]
+  focusSweeps: {
+    at: number
+    distance: number
+    sharpness: number
+    ms: number
+    kind: string
+    near: number
+    far: number
+    samples: [number, number][]
+  }[]
   /** Every camera frame of the scan (first 400): time, sharpness, and where the reading time went. */
   frameLog: FrameLog[]
   cameraSupports: string[]
