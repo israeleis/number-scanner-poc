@@ -92,6 +92,8 @@ export interface ScanResult {
   /** Continuous scanning only: per read, its label (index), the label's picture, and when it was written down. */
   captures?: { crop: HTMLCanvasElement; atMs: number; item: number; fast: boolean }[]
   durationMs?: number
+  /** Continuous scanning: labels read again and merged into the one before. */
+  merged?: number
 }
 
 const MAX_SIDE = 1280

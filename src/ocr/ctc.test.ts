@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ctcDecode } from './ctc'
+import { cleanDigits, ctcDecode } from './ctc'
 import { boxCorners, dbBoxes, inTextOrder } from './engine'
 import { laplacianVariance, preprocess } from './imageops'
 
@@ -116,5 +116,15 @@ describe('inTextOrder', () => {
 
   it('two words on one row read left to right', () => {
     expect(inTextOrder([read('B', 300, 101, 0), read('A', 100, 100, 0)]).map((r) => r.text)).toEqual(['A', 'B'])
+  })
+})
+
+describe('cleanDigits', () => {
+  it('drops quote marks a barcode leaves inside its digits', () => {
+    expect(cleanDigits('290019"603498')).toBe('290019603498')
+    expect(cleanDigits("'290019603498")).toBe('290019603498')
+  })
+  it('leaves words with few digits alone', () => {
+    expect(cleanDigits('O\'Neil 12" pipe')).toBe('O\'Neil 12" pipe')
   })
 })

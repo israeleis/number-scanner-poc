@@ -206,6 +206,7 @@ export default function App() {
           frameLog: run.frameLog,
           captures: run.captures.flatMap((c, item) => c.lines.map((_, i) => ({ crop: c.crop, atMs: c.atMs, item, fast: c.fast[i] }))),
           durationMs: run.durationMs,
+          merged: run.merged,
         }
       } else {
         scanned = await runScan(videoRef.current, engine, settings, setProgress, stopRef.current, focuser, setFocusNow)
@@ -234,6 +235,7 @@ export default function App() {
       id: crypto.randomUUID(),
       mode: result.captures ? ('continuous' as const) : ('single' as const),
       durationMs: result.durationMs ?? null,
+      merged: result.merged ?? null,
       createdAt: new Date().toISOString(),
       tester: settings.tester,
       setup,

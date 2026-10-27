@@ -34,3 +34,14 @@ export function ctcDecode(probs: Float32Array | number[], steps: number, classes
   const confidence = charConf.length ? charConf.reduce((a, b) => a + b, 0) / charConf.length : 0
   return { text: text.trim(), confidence, charConf }
 }
+
+/**
+ * A barcode's guard bars are often read as quote marks inside its digits (290019"603498). In a word
+ * of at least 4 digits, quote marks are dropped.
+ */
+export function cleanDigits(text: string): string {
+  return text
+    .split(' ')
+    .map((w) => ((w.match(/[0-9]/g) ?? []).length >= 4 ? w.replace(/["'`\u2018\u2019\u201c\u201d]/g, '') : w))
+    .join(' ')
+}

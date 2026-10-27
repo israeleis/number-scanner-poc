@@ -1,7 +1,7 @@
 // PaddleOCR in the browser: PP-OCRv4 text detection (DB) and PP-OCRv3 English recognition (CTC),
 // both run with ONNX Runtime Web on WebAssembly.
 import * as ort from 'onnxruntime-web/wasm'
-import { ctcDecode } from './ctc'
+import { cleanDigits, ctcDecode } from './ctc'
 
 const BASE = import.meta.env.BASE_URL
 
@@ -118,7 +118,7 @@ export class Engine {
       }
       const rotation = Math.round((box.angle * 180) / Math.PI + (best.flipped ? 180 : 0))
       if (best.text && best.confidence >= options.minConfidence) {
-        reads.push({ text: best.text, confidence: best.confidence, box, rotation })
+        reads.push({ text: cleanDigits(best.text), confidence: best.confidence, box, rotation })
       }
     }
     this.last = { detMs: Math.round(t1 - t0), recMs: Math.round(performance.now() - t1), boxes: boxes.length, recs }

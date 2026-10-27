@@ -49,9 +49,9 @@ export const defaults: Settings = {
   aimBox: true,
   cameraHeight: 2160,
   cameraId: '',
-  focusSweep: true,
+  focusSweep: false,
   focusSettleFrames: 1,
-  fastConfidence: 0.95,
+  fastConfidence: 0.97,
   review: false,
   viewZoom: 2,
   mode: 'single',
@@ -62,8 +62,12 @@ const KEY = 'scanner-settings'
  * Raised when a default changes that saved settings should take: values saved by an older version
  * for the keys below are replaced by the new defaults once.
  */
-const VERSION = 3
-const RESET_IN: Record<number, (keyof Settings)[]> = { 2: ['blurThreshold', 'cameraHeight'], 3: ['detLimit'] }
+const VERSION = 4
+const RESET_IN: Record<number, (keyof Settings)[]> = {
+  2: ['blurThreshold', 'cameraHeight'],
+  3: ['detLimit'],
+  4: ['focusSweep', 'fastConfidence'],
+}
 
 export function loadSettings(): Settings {
   try {

@@ -34,8 +34,9 @@ export interface Line {
 export interface ScanRecord {
   id: string
   mode: 'single' | 'continuous'
-  /** Continuous scanning: how long the run lasted. */
+  /** Continuous scanning: how long the run lasted, and how many retakes were merged. */
   durationMs: number | null
+  merged: number | null
   createdAt: string
   tester: string
   setup: string

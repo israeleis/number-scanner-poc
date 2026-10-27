@@ -13,6 +13,7 @@ import {
   type Focuser,
   type ScanProgress,
 } from './scanner'
+import { levenshtein } from './ocr/vote'
 import type { Settings } from './settings'
 
 /** One label: every line read in the box together, top to bottom. */
@@ -46,6 +47,29 @@ export function mergeOrder(before: string[], now: string[]): string[] {
     out.splice(prev === undefined ? 0 : out.indexOf(prev) + 1, 0, line)
   }
   return out
+}
+
+/**
+ * Whether a label just started is the previous label read again a little differently (the camera
+ * wavered, a blurred frame misread a character), rather than a new label. It is when the previous
+ * label was seen less than `withinMs` ago, every line of the new one is within 2 characters of a
+ * line of the previous one, and every line that differs was taken from a single frame before.
+ * Lines confirmed by two frames that differ are kept as a new label: neighbouring serials.
+ */
+export function isRetake(
+  prev: { lines: string[]; fast: boolean[] },
+  lines: string[],
+  msSinceSeen: number,
+  withinMs = 1500,
+): boolean {
+  if (msSinceSeen > withinMs) return false
+  return lines.every((line) => {
+    const k = key(line)
+    const i = prev.lines.findIndex((p) => key(p) === k)
+    if (i >= 0) return true
+    const near = prev.lines.findIndex((p) => levenshtein(key(p), k) <= 2)
+    return near >= 0 && prev.fast[near]
+  })
 }
 
 export interface TrackerUpdate {
@@ -145,6 +169,8 @@ function cropAround(frame: HTMLCanvasElement, reads: TextRead[]): HTMLCanvasElem
 
 export interface ContinuousResult {
   captures: Capture[]
+  /** Labels read again a little differently and merged into the one before. */
+  merged: number
   last: HTMLCanvasElement | null
   framesRead: number
   framesBlurry: number
@@ -167,6 +193,9 @@ export async function runContinuous(
 ): Promise<ContinuousResult> {
   const start = performance.now()
   const tracker = new LabelTracker(s.voting ? 2 : 1)
+  /** When a label was last in view, and how many retakes were merged into the label before. */
+  let lastSeen = -Infinity
+  let merged = 0
   const captures: Capture[] = []
   const sweeps: (FocusSweep & { at: number })[] = []
   const frameLog: FrameLog[] = []
@@ -218,6 +247,7 @@ export async function runContinuous(
     logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: reads.map((r) => r.text) })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: reads, region, scale: frame.width / region.w })
     const update = tracker.feed(reads, s.fastConfidence)
+    if (tracker.current) lastSeen = performance.now()
     if (update.added.length && tracker.current) {
       const lines = tracker.current
       const inLabel = reads.filter((r) => lines.includes(key(r.text)))
@@ -225,7 +255,18 @@ export async function runContinuous(
       const shown = lines.map((k) => reads.find((r) => key(r.text) === k)?.text ?? k)
       const confidence = inLabel.reduce((a, r) => a + r.confidence, 0) / Math.max(1, inLabel.length)
       const crop = cropAround(frame, inLabel.length ? inLabel : reads)
-      if (update.started) {
+      const prev = captures[captures.length - 1]
+      if (update.started && prev && isRetake(prev, shown, performance.now() - lastSeen)) {
+        // The previous label read again: keep one label, with the more confident read.
+        merged++
+        if (confidence > prev.confidence) {
+          prev.lines = shown
+          prev.fast = lines.map((k) => tracker.fast.has(k))
+          prev.confidence = confidence
+          prev.crop = crop
+        }
+        onCapture(prev, false)
+      } else if (update.started) {
         const fast = lines.map((k) => tracker.fast.has(k))
         const c: Capture = { lines: shown, fast, confidence, atMs: Math.round(performance.now() - start), crop }
         captures.push(c)
@@ -244,6 +285,7 @@ export async function runContinuous(
   }
   return {
     captures,
+    merged,
     last,
     framesRead,
     framesBlurry,

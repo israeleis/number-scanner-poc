@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LabelTracker, mergeOrder, words } from './continuous'
+import { isRetake, LabelTracker, mergeOrder, words } from './continuous'
 
 describe('LabelTracker', () => {
   it('starts a label once its lines are read the same way in two recent frames', () => {
@@ -80,5 +80,29 @@ describe('mergeOrder', () => {
   })
   it('a first line missing from this frame stays first', () => {
     expect(mergeOrder(['A', 'B'], ['B', 'C'])).toEqual(['A', 'B', 'C'])
+  })
+})
+
+describe('isRetake', () => {
+  const prev = { lines: ['1290103707569'], fast: [true] }
+
+  it('a label read again within a moment, one character off a one-frame read, is the same label', () => {
+    expect(isRetake(prev, ['7290103707569'], 700)).toBe(true)
+  })
+
+  it('not after the moment has passed', () => {
+    expect(isRetake(prev, ['7290103707569'], 3000)).toBe(false)
+  })
+
+  it('neighbouring serials both confirmed by two frames stay two labels', () => {
+    expect(isRetake({ lines: ['A7310592'], fast: [false] }, ['A7310593'], 500)).toBe(false)
+  })
+
+  it('a really different label is not a retake', () => {
+    expect(isRetake({ lines: ['SPARK'], fast: [true] }, ['MIDEA'], 500)).toBe(false)
+  })
+
+  it('the same lines again are a retake', () => {
+    expect(isRetake({ lines: ['RARE', 'X1'], fast: [false, false] }, ['RARE'], 500)).toBe(true)
   })
 })
