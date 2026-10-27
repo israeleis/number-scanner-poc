@@ -4,11 +4,39 @@ import { laplacianVariance, preprocess, toGray } from './ocr/imageops'
 import { inReadingOrder, vote, type FrameRead, type VotedRead } from './ocr/vote'
 import type { Settings } from './settings'
 
+/** A rectangle in video pixels. */
+export interface Region {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** Share of the visible picture's width and height the aiming box covers. */
+export const AIM_W = 0.8
+export const AIM_H = 0.3
+
+/**
+ * The part of the video that is visible in an element of `elW` x `elH` shown with object-fit: cover,
+ * reduced to its middle `fw` x `fh` share.
+ */
+export function aimRegion(videoW: number, videoH: number, elW: number, elH: number, fw: number, fh: number): Region {
+  const s = Math.max(elW / videoW, elH / videoH)
+  const visW = elW / s
+  const visH = elH / s
+  const w = visW * fw
+  const h = visH * fh
+  return { x: (videoW - w) / 2, y: (videoH - h) / 2, w, h }
+}
+
 export interface ScanProgress {
   sharpness: number
   framesRead: number
   framesBlurry: number
   lastReads: TextRead[]
+  /** The part of the video that was read, and how much it was scaled down. */
+  region: Region
+  scale: number
 }
 
 export interface ScanResult {
@@ -24,13 +52,23 @@ export interface ScanResult {
 
 const MAX_SIDE = 1280
 
-function grab(video: HTMLVideoElement): HTMLCanvasElement {
-  const scale = Math.min(1, MAX_SIDE / Math.max(video.videoWidth, video.videoHeight))
+export function frameScale(r: Region) {
+  return Math.min(1, MAX_SIDE / Math.max(r.w, r.h))
+}
+
+function grab(video: HTMLVideoElement, r: Region): HTMLCanvasElement {
+  const scale = frameScale(r)
   const c = document.createElement('canvas')
-  c.width = Math.round(video.videoWidth * scale)
-  c.height = Math.round(video.videoHeight * scale)
-  c.getContext('2d', { willReadFrequently: true })!.drawImage(video, 0, 0, c.width, c.height)
+  c.width = Math.round(r.w * scale)
+  c.height = Math.round(r.h * scale)
+  c.getContext('2d', { willReadFrequently: true })!.drawImage(video, r.x, r.y, r.w, r.h, 0, 0, c.width, c.height)
   return c
+}
+
+function regionOf(video: HTMLVideoElement, aimBox: boolean): Region {
+  const full = { x: 0, y: 0, w: video.videoWidth, h: video.videoHeight }
+  if (!aimBox || !video.clientWidth) return full
+  return aimRegion(video.videoWidth, video.videoHeight, video.clientWidth, video.clientHeight, AIM_W, AIM_H)
 }
 
 /** Sharpness of the middle of the frame, measured on a 320-pixel-wide copy. */
@@ -77,12 +115,14 @@ export async function runScan(
   let doneAt: number | null = null
 
   while (!signal.stopped && performance.now() - start < s.timeoutSec * 1000) {
-    const frame = grab(video)
+    const region = regionOf(video, s.aimBox)
+    const scale = frameScale(region)
+    const frame = grab(video, region)
     last = frame
     const sharp = sharpnessOf(frame)
     if (sharp < s.blurThreshold) {
       framesBlurry++
-      onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: [] })
+      onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: [], region, scale })
       await nextFrame()
       continue
     }
@@ -94,7 +134,7 @@ export async function runScan(
     })
     framesRead++
     sharpSum += sharp
-    onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: frameReads })
+    onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: frameReads, region, scale })
     if (frameReads.length) {
       framesWithText++
       const weight = sharp / (sharp + s.blurThreshold)
@@ -122,7 +162,7 @@ export async function runScan(
   let voted = vote(reads)
   // With voting, a text seen in only one frame is noise, unless only one frame had any text.
   if (s.voting && framesWithText >= 2) voted = voted.filter((v) => v.frames >= 2)
-  const original = best?.original ?? last ?? grab(video)
+  const original = best?.original ?? last ?? grab(video, regionOf(video, s.aimBox))
   if (voted.length && doneAt === null) doneAt = performance.now()
   return {
     reads: inReadingOrder(voted),

@@ -36,7 +36,7 @@ export interface ScanRecord {
   summary: string
   lines: Line[]
   /** The single frame kept as the image, with each read and its box (pixels of that image). */
-  frameReads: { text: string; confidence: number; box: { x: number; y: number; w: number; h: number } }[]
+  frameReads: { text: string; confidence: number; box: { x: number; y: number; w: number; h: number }; rotation: number }[]
   framesRead: number
   framesBlurry: number
   sharpness: number
@@ -46,6 +46,10 @@ export interface ScanRecord {
   notes: string
   device: string
   resolution: string
+  /** Only the aiming box was read (the images are of that box only). */
+  aimBox: boolean
+  camera: string
+  focusDistance: number | null
   cameraSupports: string[]
   hardwareApplied: string[]
   appVersion: string

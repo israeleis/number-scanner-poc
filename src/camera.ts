@@ -10,12 +10,32 @@ export interface CameraCaps {
   exposureCompensation?: { min: number; max: number; step: number }
   sharpness?: { min: number; max: number; step: number }
   contrast?: { min: number; max: number; step: number }
+  focusDistance?: { min: number; max: number; step: number }
 }
 
-export async function openCamera(video: HTMLVideoElement): Promise<MediaStreamTrack> {
+export interface CameraChoice {
+  deviceId: string
+  label: string
+}
+
+/** Back cameras (labels are only known after camera permission was given). */
+export async function listCameras(): Promise<CameraChoice[]> {
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  return devices
+    .filter((d) => d.kind === 'videoinput')
+    .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `camera ${i + 1}` }))
+}
+
+/** `height` is the short side asked for (1080, 1440, 2160); the phone may give less. */
+export async function openCamera(video: HTMLVideoElement, deviceId: string, height: number): Promise<MediaStreamTrack> {
+  const width = Math.round((height * 16) / 9)
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    video: {
+      ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } }),
+      width: { ideal: width },
+      height: { ideal: height },
+    },
   })
   video.srcObject = stream
   video.setAttribute('playsinline', '')
@@ -37,6 +57,7 @@ export function supportedList(caps: CameraCaps): string[] {
   if (caps.exposureCompensation) out.push('exposureCompensation')
   if (caps.sharpness) out.push('sharpness')
   if (caps.contrast) out.push('contrast')
+  if (caps.focusDistance && caps.focusMode?.includes('manual')) out.push('manualFocus')
   return out
 }
 
@@ -55,6 +76,12 @@ export function setTorch(track: MediaStreamTrack, on: boolean) {
 
 export function setZoom(track: MediaStreamTrack, zoom: number) {
   return apply(track, { zoom })
+}
+
+/** A focus distance in the phone's units (usually metres), or null for continuous autofocus. */
+export async function setFocus(track: MediaStreamTrack, distance: number | null) {
+  if (distance === null) return apply(track, { focusMode: 'continuous' })
+  return apply(track, { focusMode: 'manual', focusDistance: distance })
 }
 
 /**

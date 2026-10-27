@@ -1,0 +1,19 @@
+import { describe, expect, it } from 'vitest'
+import { aimRegion } from './scanner'
+
+describe('aimRegion', () => {
+  it('a portrait video in a portrait box that fits exactly: the middle share of the whole picture', () => {
+    expect(aimRegion(1080, 1920, 300, 533.33, 0.8, 0.3)).toEqual(
+      expect.objectContaining({ x: expect.closeTo(108, 0), w: expect.closeTo(864, 0), h: expect.closeTo(576, 0) }),
+    )
+  })
+
+  it('a landscape video cropped into a 3:4 box: the box is within the visible middle', () => {
+    const r = aimRegion(1920, 1080, 300, 400, 0.8, 0.3)
+    // Visible part: 810 wide (1080 * 3 / 4), all 1080 high.
+    expect(r.w).toBeCloseTo(648)
+    expect(r.h).toBeCloseTo(324)
+    expect(r.x).toBeCloseTo((1920 - 648) / 2)
+    expect(r.y).toBeCloseTo((1080 - 324) / 2)
+  })
+})

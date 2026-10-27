@@ -40,6 +40,11 @@ main { padding: 10px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); 
 .scan { display: flex; flex-direction: column; gap: 10px; }
 .viewfinder { position: relative; width: 100%; aspect-ratio: 3 / 4; max-height: 62vh; background: #000; border-radius: 12px; overflow: hidden; }
 .viewfinder video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.aim {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  border: 2px solid rgba(255, 255, 255, 0.9); border-radius: 8px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.35); pointer-events: none;
+}
 .overlay { position: absolute; inset: 0; pointer-events: none; }
 .livebox { position: absolute; border: 2px solid #00e676; border-radius: 4px; }
 .livebox span {
@@ -51,6 +56,11 @@ main { padding: 10px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); 
 .toggles, .scenes { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { border-radius: 999px; font-size: 14px; padding: 6px 12px; }
 .chip.on { background: #0d47a1; border-color: #42a5f5; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.quick .zoom { flex: 1; min-width: 180px; }
+select { width: 100%; padding: 10px; margin-top: 4px; border-radius: 8px; border: 1px solid #555; background: #1c1c1c; color: #fff; font: inherit; }
+.check { display: flex; gap: 8px; align-items: center; }
+.check input { width: auto; margin: 0; }
 .zoom { display: flex; gap: 10px; align-items: center; margin: 0; }
 .zoom input { flex: 1; }
 

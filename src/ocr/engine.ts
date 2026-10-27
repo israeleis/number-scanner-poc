@@ -17,6 +17,8 @@ export interface TextRead {
   text: string
   confidence: number
   box: Box
+  /** How the crop was turned to read it: 0, 180, 90 (clockwise) or -90. */
+  rotation: number
 }
 
 export interface OcrOptions {
@@ -71,8 +73,15 @@ export class Engine {
       .slice(0, options.maxBoxes)
     const reads: TextRead[] = []
     for (const box of boxes) {
-      const r = await this.recognize(canvas, box)
-      if (r.text && r.confidence >= options.minConfidence) reads.push({ ...r, box })
+      // The model reads left to right only. Tall boxes are vertical text: try both quarter turns.
+      // A wide box read with doubt may be upside down: try it turned half way too.
+      const tall = box.h > box.w * 1.5
+      let best = { ...(await this.recognize(canvas, box, tall ? 90 : 0)), rotation: tall ? 90 : 0 }
+      for (const rotation of tall ? [-90] : best.confidence < 0.9 ? [180] : []) {
+        const r = await this.recognize(canvas, box, rotation)
+        if (r.confidence > best.confidence) best = { ...r, rotation }
+      }
+      if (best.text && best.confidence >= options.minConfidence) reads.push({ ...best, box })
     }
     // Top to bottom, then right to left in a row is not needed: Latin text reads left to right.
     return reads.sort((a, b) => (Math.abs(a.box.y - b.box.y) < a.box.h / 2 ? a.box.x - b.box.x : a.box.y - b.box.y))
@@ -103,10 +112,12 @@ export class Engine {
     }))
   }
 
-  private async recognize(canvas: HTMLCanvasElement, box: Box) {
+  private async recognize(canvas: HTMLCanvasElement, box: Box, rotation: number) {
     const H = 48
-    const W = Math.min(640, Math.max(16, Math.ceil((H * box.w) / box.h)))
-    const px = drawScaled(canvas, box.x, box.y, box.w, box.h, W, H)
+    const quarter = Math.abs(rotation) === 90
+    const [bw, bh] = quarter ? [box.h, box.w] : [box.w, box.h]
+    const W = Math.min(640, Math.max(16, Math.ceil((H * bw) / bh)))
+    const px = drawScaled(canvas, box.x, box.y, box.w, box.h, W, H, rotation)
     const input = new Float32Array(3 * W * H)
     for (let i = 0; i < W * H; i++) {
       for (let c = 0; c < 3; c++) input[c * W * H + i] = (px[i * 4 + (2 - c)] / 255 - 0.5) / 0.5
@@ -120,12 +131,27 @@ export class Engine {
 
 let scratch: HTMLCanvasElement | null = null
 
-function drawScaled(src: HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number, w: number, h: number) {
+/** Draws the source rectangle into a w x h image, turned by `rotation` degrees clockwise. */
+function drawScaled(
+  src: HTMLCanvasElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+  w: number,
+  h: number,
+  rotation = 0,
+) {
   scratch ??= document.createElement('canvas')
   scratch.width = w
   scratch.height = h
   const ctx = scratch.getContext('2d', { willReadFrequently: true })!
-  ctx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h)
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.translate(w / 2, h / 2)
+  ctx.rotate((rotation * Math.PI) / 180)
+  // After a quarter turn the drawn rectangle is h wide and w high.
+  const [dw, dh] = Math.abs(rotation) === 90 ? [h, w] : [w, h]
+  ctx.drawImage(src, sx, sy, sw, sh, -dw / 2, -dh / 2, dw, dh)
   return ctx.getImageData(0, 0, w, h).data
 }
 

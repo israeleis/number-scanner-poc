@@ -13,6 +13,12 @@ export interface Settings {
   minConfidence: number
   timeoutSec: number
   tester: string
+  /** Read only the aiming box in the middle of the screen, at full camera resolution. */
+  aimBox: boolean
+  /** Short side of the camera picture asked for: 1080, 1440 or 2160. */
+  cameraHeight: number
+  /** Chosen camera; empty: the default back camera. */
+  cameraId: string
 }
 
 export const defaults: Settings = {
@@ -28,6 +34,9 @@ export const defaults: Settings = {
   minConfidence: 0.5,
   timeoutSec: 12,
   tester: '',
+  aimBox: true,
+  cameraHeight: 1080,
+  cameraId: '',
 }
 
 const KEY = 'scanner-settings'
