@@ -19,6 +19,8 @@ export interface Line {
   agreement: number | null
   /** The words of the line, each searchable on its own. */
   words: string[]
+  /** Continuous scanning: taken from one frame on high confidence, without a second frame agreeing. */
+  fast: boolean | null
   /** Continuous scanning: the label it belongs to (1 is the first), when that label was written
    * down (ms from the start), and the index of the label's picture. */
   item: number | null

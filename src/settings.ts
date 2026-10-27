@@ -21,6 +21,8 @@ export interface Settings {
   cameraId: string
   /** Search for the sharpest focus when a scan starts (phones that let the site move the lens). */
   focusSweep: boolean
+  /** Continuous scanning: a line read with at least this confidence counts at once (no second frame). */
+  fastConfidence: number
   /** Camera frames to wait after moving the lens before measuring (one frame is about 33 ms). */
   focusSettleFrames: number
   /** The app's own magnification of the picture (1-4): only the middle is shown and read. */
@@ -47,6 +49,7 @@ export const defaults: Settings = {
   cameraId: '',
   focusSweep: true,
   focusSettleFrames: 1,
+  fastConfidence: 0.95,
   viewZoom: 2,
   mode: 'single',
 }

@@ -18,6 +18,8 @@ import type { Settings } from './settings'
 /** One label: every line read in the box together, top to bottom. */
 export interface Capture {
   lines: string[]
+  /** Per line: taken from one frame on high confidence (not confirmed by a second frame). */
+  fast: boolean[]
   /** Average confidence of the lines' reads. */
   confidence: number
   /** Time since the start of the run when the label was first written down. */
@@ -78,12 +80,22 @@ export class LabelTracker {
     this.gap = gap
   }
 
-  /** The lines of one frame, top to bottom. */
-  feed(lines: string[]): TrackerUpdate {
-    const keys = lines.map(key).filter((k) => k.length > 0)
+  /** Lines taken from a single frame because they were read with high confidence. */
+  fast = new Set<string>()
+
+  /**
+   * The lines of one frame, in reading order. A line read with at least `fastConfidence` counts at
+   * once, without waiting for another frame to agree.
+   */
+  feed(lines: (string | { text: string; confidence: number })[], fastConfidence = 2): TrackerUpdate {
+    const items = lines.map((l) => (typeof l === 'string' ? { text: l, confidence: 0 } : l))
+    const keys = items.map((l) => key(l.text)).filter((k) => k.length > 0)
+    const sure = new Set(items.filter((l) => l.confidence >= fastConfidence).map((l) => key(l.text)))
     this.recent.push(new Set(keys))
     if (this.recent.length > this.window) this.recent.shift()
-    const steady = keys.filter((k, i) => keys.indexOf(k) === i && this.recent.filter((f) => f.has(k)).length >= this.need)
+    const seen = (k: string) => this.recent.filter((f) => f.has(k)).length
+    const steady = keys.filter((k, i) => keys.indexOf(k) === i && (seen(k) >= this.need || sure.has(k)))
+    for (const k of steady) if (seen(k) < this.need) this.fast.add(k)
     if (!steady.length) {
       if (++this.emptyFrames >= this.gap) this.current = null
       return { started: false, added: [] }
@@ -205,7 +217,7 @@ export async function runContinuous(
     sharpSum += sharp
     logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: reads.map((r) => r.text) })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: reads, region, scale: frame.width / region.w })
-    const update = tracker.feed(reads.map((r) => r.text))
+    const update = tracker.feed(reads, s.fastConfidence)
     if (update.added.length && tracker.current) {
       const lines = tracker.current
       const inLabel = reads.filter((r) => lines.includes(key(r.text)))
@@ -214,12 +226,14 @@ export async function runContinuous(
       const confidence = inLabel.reduce((a, r) => a + r.confidence, 0) / Math.max(1, inLabel.length)
       const crop = cropAround(frame, inLabel.length ? inLabel : reads)
       if (update.started) {
-        const c: Capture = { lines: shown, confidence, atMs: Math.round(performance.now() - start), crop }
+        const fast = lines.map((k) => tracker.fast.has(k))
+        const c: Capture = { lines: shown, fast, confidence, atMs: Math.round(performance.now() - start), crop }
         captures.push(c)
         onCapture(c, true)
       } else {
         const c = captures[captures.length - 1]
         c.lines = shown
+        c.fast = lines.map((k) => tracker.fast.has(k))
         c.confidence = confidence
         c.crop = crop
         onCapture(c, false)

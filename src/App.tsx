@@ -200,7 +200,7 @@ export default function App() {
           timeToResultMs: null,
           sweeps: run.sweeps,
           frameLog: run.frameLog,
-          captures: run.captures.flatMap((c, item) => c.lines.map(() => ({ crop: c.crop, atMs: c.atMs, item }))),
+          captures: run.captures.flatMap((c, item) => c.lines.map((_, i) => ({ crop: c.crop, atMs: c.atMs, item, fast: c.fast[i] }))),
           durationMs: run.durationMs,
         })
       } else {
@@ -499,6 +499,7 @@ interface DraftLine {
   agreement: number | null
   atMs: number | null
   item: number | null
+  fast: boolean | null
   thumb: string | null
 }
 
@@ -517,6 +518,7 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       agreement: round(r.agreement),
       atMs: result.captures?.[i].atMs ?? null,
       item: result.captures?.[i].item ?? null,
+      fast: result.captures?.[i].fast ?? null,
       // The label's picture is shown once, above its first line.
       thumb:
         result.captures && (i === 0 || result.captures[i - 1].item !== result.captures[i].item)
@@ -560,6 +562,7 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       frames: null,
       agreement: null,
       atMs: null,
+      fast: null,
       // A missed line belongs to the label of the line above it.
       item: at >= 0 ? lines[at].item : (lines[0]?.item ?? null),
       thumb: null,
@@ -583,6 +586,7 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       frames: l.frames,
       agreement: l.agreement,
       words: words(l.missed ? l.actual.trim() : l.read),
+      fast: l.fast,
       item: l.item === null ? null : l.item + 1,
       atMs: l.atMs,
       crop: l.item,
@@ -794,6 +798,12 @@ function SettingsScreen({
         label="פריימים להמתנה אחרי הזזת העדשה (פריים ≈ 33ms)"
         value={s.focusSettleFrames}
         set={(n) => setSettings({ ...s, focusSettleFrames: Math.max(1, Math.round(n)) })}
+      />
+      <NumberField
+        label="סריקה רציפה: ביטחון שמספיק לפריים אחד (0-1; 1 = תמיד לחכות לפריים שני)"
+        value={s.fastConfidence}
+        step={0.01}
+        set={(n) => setSettings({ ...s, fastConfidence: n })}
       />
       <NumberField label="זמן מקסימלי לסריקה (שניות)" value={s.timeoutSec} set={(n) => setSettings({ ...s, timeoutSec: n })} />
       <NumberField label="תיקון חשיפה (כשבקרת מצלמה פועלת)" value={s.exposureComp} step={0.5} set={(n) => setSettings({ ...s, exposureComp: n })} />

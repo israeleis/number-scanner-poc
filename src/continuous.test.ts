@@ -48,6 +48,21 @@ describe('LabelTracker', () => {
     expect(t.feed(['A73I0592', 'A7310592']).added).toEqual([])
   })
 
+  it('a line read with high confidence counts at once', () => {
+    const t = new LabelTracker(2)
+    const u = t.feed([{ text: 'A7310592', confidence: 0.98 }, { text: 'MADE IN', confidence: 0.8 }], 0.95)
+    expect(u.started).toBe(true)
+    expect(t.current).toEqual(['A7310592'])
+    expect(t.fast.has('A7310592')).toBe(true)
+  })
+
+  it('a line below the confidence still waits for a second frame', () => {
+    const t = new LabelTracker(2)
+    expect(t.feed([{ text: 'A7310592', confidence: 0.9 }], 0.95).started).toBe(false)
+    expect(t.feed([{ text: 'A7310592', confidence: 0.9 }], 0.95).started).toBe(true)
+    expect(t.fast.has('A7310592')).toBe(false)
+  })
+
   it('without voting one frame is enough', () => {
     expect(new LabelTracker(1).feed(['42']).started).toBe(true)
   })

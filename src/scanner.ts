@@ -90,7 +90,7 @@ export interface ScanResult {
   sweeps: (FocusSweep & { at: number })[]
   frameLog: FrameLog[]
   /** Continuous scanning only: per read, its label (index), the label's picture, and when it was written down. */
-  captures?: { crop: HTMLCanvasElement; atMs: number; item: number }[]
+  captures?: { crop: HTMLCanvasElement; atMs: number; item: number; fast: boolean }[]
   durationMs?: number
 }
 
