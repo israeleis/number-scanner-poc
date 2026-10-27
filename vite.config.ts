@@ -21,6 +21,16 @@ function labServer(): Plugin {
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify(body))
         }
+        console.log(`[lab] ${new Date().toLocaleTimeString()} ${req.method} from ${req.socket.remoteAddress} ${req.headers['content-length'] ?? ''}`)
+        // The installed app on GitHub Pages may send here too (its script URL set to this address).
+        res.setHeader('Access-Control-Allow-Origin', '*')
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+        res.setHeader('Access-Control-Allow-Private-Network', 'true')
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204
+          return res.end()
+        }
         if (req.method === 'GET') return reply({ ok: true, sheet: `this computer (${root})` })
         let raw = ''
         req.on('data', (c) => (raw += c))
@@ -40,8 +50,10 @@ function labServer(): Plugin {
             ;(body.crops ?? []).forEach((b64: string, i: number) => save(b64, `label-${i + 1}.jpg`))
             writeFileSync(join(dir, 'record.json'), JSON.stringify(r, null, 2))
             appendFileSync(join(root, 'index.jsonl'), JSON.stringify({ dir, id: r.id, createdAt: r.createdAt, mode: r.mode, outcome: r.outcome, summary: r.summary }) + '\n')
+            console.log(`[lab] saved ${dir} (${r.lines?.length ?? 0} lines)`)
             reply({ ok: true })
           } catch (e) {
+            console.log(`[lab] failed: ${e}`)
             res.statusCode = 400
             reply({ ok: false, error: String(e) })
           }
@@ -56,7 +68,8 @@ export default defineConfig({
     __BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16)),
     __LAB__: JSON.stringify(LAB),
   },
-  server: LAB ? { host: '0.0.0.0', port: 5443, strictPort: true } : undefined,
+  // Vite's own CORS handling is off in the lab: the scan receiver answers cross-site requests itself.
+  server: LAB ? { host: '0.0.0.0', port: 5443, strictPort: true, cors: false } : undefined,
   base: '/number-scanner-poc/',
   plugins: [
     ...(LAB ? [basicSsl(), labServer()] : []),
