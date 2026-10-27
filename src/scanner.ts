@@ -67,6 +67,9 @@ export interface ScanResult {
   timeToResultMs: number | null
   /** Focus searches made during the scan, in order. */
   sweeps: FocusSweep[]
+  /** Continuous scanning only: per read, its picture and when it was written down. */
+  captures?: { crop: HTMLCanvasElement; atMs: number }[]
+  durationMs?: number
 }
 
 const MAX_SIDE = 1280
@@ -75,7 +78,7 @@ export function frameScale(r: Region) {
   return Math.min(1, MAX_SIDE / Math.max(r.w, r.h))
 }
 
-function grab(video: HTMLVideoElement, r: Region): HTMLCanvasElement {
+export function grab(video: HTMLVideoElement, r: Region): HTMLCanvasElement {
   const scale = frameScale(r)
   const c = document.createElement('canvas')
   c.width = Math.round(r.w * scale)
@@ -85,7 +88,7 @@ function grab(video: HTMLVideoElement, r: Region): HTMLCanvasElement {
 }
 
 /** What is read: the aiming box, or with the box off everything visible on screen. */
-function regionOf(video: HTMLVideoElement, s: Settings): Region {
+export function frameRegion(video: HTMLVideoElement, s: Settings): Region {
   if (!video.clientWidth) return { x: 0, y: 0, w: video.videoWidth, h: video.videoHeight }
   const [fw, fh] = s.aimBox ? [AIM_W, AIM_H] : [1, 1]
   return aimRegion(video.videoWidth, video.videoHeight, video.clientWidth, video.clientHeight, fw, fh, s.viewZoom)
@@ -102,7 +105,7 @@ export function sharpnessOf(frame: HTMLCanvasElement, w = 320): number {
   return laplacianVariance(toGray(ctx.getImageData(0, 0, w, h)), w, h)
 }
 
-function processedCopy(frame: HTMLCanvasElement): HTMLCanvasElement {
+export function processedCopy(frame: HTMLCanvasElement): HTMLCanvasElement {
   const c = document.createElement('canvas')
   c.width = frame.width
   c.height = frame.height
@@ -127,7 +130,7 @@ export async function runScan(
   const start = performance.now()
   const sweeps: FocusSweep[] = []
   // Focus is judged on the aiming box at a finer scale than the blur gate, since the text is small.
-  const measure = () => sharpnessOf(grab(video, regionOf(video, s)), 640)
+  const measure = () => sharpnessOf(grab(video, frameRegion(video, s)), 640)
   const sweep = async () => {
     if (!focuser) return
     const r = await focuser(measure)
@@ -145,7 +148,7 @@ export async function runScan(
   let doneAt: number | null = null
 
   while (!signal.stopped && performance.now() - start < s.timeoutSec * 1000) {
-    const region = regionOf(video, s)
+    const region = frameRegion(video, s)
     const scale = frameScale(region)
     const frame = grab(video, region)
     last = frame
@@ -198,7 +201,7 @@ export async function runScan(
   let voted = vote(reads)
   // With voting, a text seen in only one frame is noise, unless only one frame had any text.
   if (s.voting && framesWithText >= 2) voted = voted.filter((v) => v.frames >= 2)
-  const original = best?.original ?? last ?? grab(video, regionOf(video, s))
+  const original = best?.original ?? last ?? grab(video, frameRegion(video, s))
   if (voted.length && doneAt === null) doneAt = performance.now()
   return {
     reads: inReadingOrder(voted),

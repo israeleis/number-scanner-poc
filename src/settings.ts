@@ -23,6 +23,8 @@ export interface Settings {
   focusSweep: boolean
   /** The app's own magnification of the picture (1-4): only the middle is shown and read. */
   viewZoom: number
+  /** single: one scan, then the report. continuous: keeps reading and writes down every new text. */
+  mode: 'single' | 'continuous'
 }
 
 export const defaults: Settings = {
@@ -43,6 +45,7 @@ export const defaults: Settings = {
   cameraId: '',
   focusSweep: true,
   viewZoom: 2,
+  mode: 'single',
 }
 
 const KEY = 'scanner-settings'

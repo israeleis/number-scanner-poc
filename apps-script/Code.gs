@@ -5,7 +5,7 @@
 const KEY = 'change-me'
 
 const COLUMNS = [
-  'id', 'createdAt', 'tester', 'outcome', 'summary', 'setup', 'preprocess', 'hardware', 'voting',
+  'id', 'mode', 'durationMs', 'createdAt', 'tester', 'outcome', 'summary', 'setup', 'preprocess', 'hardware', 'voting',
   'torch', 'zoom', 'timeToResultMs', 'lines', 'frameReads', 'framesRead', 'framesBlurry', 'sharpness',
   'voteFrames', 'blurThreshold', 'detLimit', 'minConfidence', 'scene', 'notes', 'resolution', 'aimBox', 'camera', 'cameraMinFocus',
   'focusSweep', 'focusSweeps',
@@ -14,7 +14,7 @@ const COLUMNS = [
 
 const LINE_COLUMNS = [
   'scanId', 'createdAt', 'tester', 'setup', 'line', 'read', 'actual', 'outcome', 'confidence', 'frames',
-  'agreement', 'scene',
+  'agreement', 'atMs', 'image', 'scene',
 ]
 
 function doGet(e) {
@@ -39,6 +39,9 @@ function doPost(e) {
     const folder = imagesFolder(ss)
     r.originalImage = saveImage(folder, body.original, r.id + '-original.jpg')
     r.processedImage = saveImage(folder, body.processed, r.id + '-processed.jpg')
+    const cropUrls = (body.crops || []).map(function (b64, i) {
+      return saveImage(folder, b64, r.id + '-text-' + (i + 1) + '.jpg')
+    })
     sheet.appendRow(COLUMNS.map(function (c) {
       const v = r[c]
       if (v === null || v === undefined) return ''
@@ -48,7 +51,8 @@ function doPost(e) {
     const rows = (r.lines || []).map(function (l) {
       return [r.id, r.createdAt, r.tester, r.setup, l.line, l.read, l.actual, l.outcome,
         l.confidence === null ? '' : l.confidence, l.frames === null ? '' : l.frames,
-        l.agreement === null ? '' : l.agreement, (r.scene || []).join(', ')]
+        l.agreement === null ? '' : l.agreement, l.atMs === null || l.atMs === undefined ? '' : l.atMs,
+        l.crop === null || l.crop === undefined ? '' : (cropUrls[l.crop] || ''), (r.scene || []).join(', ')]
     })
     if (rows.length) linesSheet.getRange(linesSheet.getLastRow() + 1, 1, rows.length, LINE_COLUMNS.length).setValues(rows)
     return reply({ ok: true })

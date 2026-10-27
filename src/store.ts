@@ -15,10 +15,16 @@ export interface Line {
   confidence: number | null
   frames: number | null
   agreement: number | null
+  /** Continuous scanning: when it was written down (ms from the start), and its picture's index. */
+  atMs: number | null
+  crop: number | null
 }
 
 export interface ScanRecord {
   id: string
+  mode: 'single' | 'continuous'
+  /** Continuous scanning: how long the run lasted. */
+  durationMs: number | null
   createdAt: string
   tester: string
   setup: string
@@ -64,6 +70,8 @@ export interface StoredScan {
   record: ScanRecord
   original: Blob
   processed: Blob | null
+  /** Continuous scanning: a picture of each text written down. */
+  crops?: Blob[]
   synced: boolean
   syncError?: string
 }
@@ -118,6 +126,7 @@ export async function syncPending(url: string, key: string): Promise<number> {
           record: s.record,
           original: await toBase64(s.original),
           processed: s.processed ? await toBase64(s.processed) : '',
+          crops: await Promise.all((s.crops ?? []).map(toBase64)),
         })
         // text/plain keeps this a "simple" request: Apps Script cannot answer a CORS preflight.
         const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body })

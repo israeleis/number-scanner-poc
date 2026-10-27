@@ -17,7 +17,8 @@ import {
   type CameraChoice,
 } from './camera'
 import { boxCorners, loadEngine, type Engine } from './ocr/engine'
-import { AIM_H, AIM_W, displayScale, runScan, type ScanProgress, type ScanResult } from './scanner'
+import { runContinuous, signal, type Capture } from './continuous'
+import { AIM_H, AIM_W, displayScale, grab, frameRegion, runScan, type ScanProgress, type ScanResult } from './scanner'
 import { loadSettings, saveSettings, setupName, type Settings } from './settings'
 import { allScans, putScan, syncPending, testConnection, type Line, type Outcome, type StoredScan } from './store'
 
@@ -43,6 +44,9 @@ export default function App() {
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const [result, setResult] = useState<ScanResult | null>(null)
+  /** Texts written down so far in a continuous run, newest first. */
+  const [live, setLive] = useState<Capture[]>([])
+  const audioRef = useRef<AudioContext | null>(null)
   const [scans, setScans] = useState<StoredScan[]>([])
   const [pending, setPending] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -136,8 +140,40 @@ export default function App() {
     try {
       const t = track
       const focuser = t && canSweepFocus(caps) ? (measure: () => number) => sweepFocus(t, measure) : null
-      const r = await runScan(videoRef.current, engine, settings, setProgress, stopRef.current, focuser)
-      setResult(r)
+      if (settings.mode === 'continuous') {
+        // Sound may only start from a tap, so the audio is set up here.
+        audioRef.current ??= new AudioContext()
+        audioRef.current.resume()
+        setLive([])
+        const video = videoRef.current
+        const run = await runContinuous(
+          video,
+          engine,
+          settings,
+          (c) => {
+            signal(audioRef.current)
+            setLive((l) => [c, ...l])
+          },
+          setProgress,
+          stopRef.current,
+          focuser,
+        )
+        setResult({
+          reads: run.captures.map((c) => ({ text: c.text, confidence: c.confidence, frames: c.frames, agreement: 1, x: 0, y: 0, h: 0 })),
+          original: run.last ?? grab(video, frameRegion(video, settings)),
+          processed: null,
+          frameReads: [],
+          framesRead: run.framesRead,
+          framesBlurry: run.framesBlurry,
+          sharpness: run.sharpness,
+          timeToResultMs: null,
+          sweeps: run.sweeps,
+          captures: run.captures.map((c) => ({ crop: c.crop, atMs: c.atMs })),
+          durationMs: run.durationMs,
+        })
+      } else {
+        setResult(await runScan(videoRef.current, engine, settings, setProgress, stopRef.current, focuser))
+      }
       setScreen('report')
     } finally {
       setScanning(false)
@@ -152,6 +188,8 @@ export default function App() {
       new Promise<Blob>((res) => c.toBlob((b) => res(b!), 'image/jpeg', 0.9))
     const record = {
       id: crypto.randomUUID(),
+      mode: result.captures ? ('continuous' as const) : ('single' as const),
+      durationMs: result.durationMs ?? null,
       createdAt: new Date().toISOString(),
       tester: settings.tester,
       setup,
@@ -196,6 +234,7 @@ export default function App() {
       record,
       original: await toBlob(result.original),
       processed: result.processed ? await toBlob(result.processed) : null,
+      crops: result.captures ? await Promise.all(result.captures.map((c) => toBlob(c.crop))) : undefined,
       synced: false,
     })
     setResult(null)
@@ -218,12 +257,32 @@ export default function App() {
 
       {screen === 'scan' && (
         <main className="scan">
+          <div className="tabs" role="tablist">
+            {(['single', 'continuous'] as const).map((m) => (
+              <button
+                key={m}
+                role="tab"
+                aria-selected={settings.mode === m}
+                className={settings.mode === m ? 'tab on' : 'tab'}
+                disabled={scanning}
+                onClick={() => setSettings({ ...settings, mode: m })}
+              >
+                {m === 'single' ? 'סריקה בודדת' : 'סריקה רציפה'}
+              </button>
+            ))}
+          </div>
           <div className="viewfinder">
             <video ref={videoRef} playsInline muted style={{ transform: `scale(${settings.viewZoom})` }} />
             {settings.aimBox && (
               <div className="aim" style={{ width: `${AIM_W * 100}%`, height: `${AIM_H * 100}%` }} />
             )}
             {scanning && progress && <LiveBoxes video={videoRef.current} progress={progress} zoom={settings.viewZoom} />}
+            {scanning && settings.mode === 'continuous' && live.length > 0 && (
+              <div className="last-capture" key={live.length}>
+                <span className="count">{live.length}</span>
+                <span dir="ltr">{live[0].text}</span>
+              </div>
+            )}
           </div>
           {cameraError && <p className="error">המצלמה לא נפתחה: {cameraError}</p>}
           {engineError && <p className="error">המודל לא נטען: {engineError}</p>}
@@ -267,12 +326,21 @@ export default function App() {
                 {progress?.framesBlurry ?? 0}
               </p>
               <button className="big stop" onClick={() => (stopRef.current.stopped = true)}>
-                עצור
+                {settings.mode === 'continuous' ? `סיים ובדוק (${live.length})` : 'עצור'}
               </button>
+              {settings.mode === 'continuous' && (
+                <ol className="live" reversed>
+                  {live.map((c, i) => (
+                    <li key={live.length - i} className={i === 0 ? 'newest' : ''}>
+                      <span dir="ltr">{c.text}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </>
           ) : (
             <button className="big" disabled={!engine || !track} onClick={startScan}>
-              סרוק
+              {settings.mode === 'continuous' ? 'התחל סריקה רציפה' : 'סרוק'}
             </button>
           )}
         </main>
@@ -363,13 +431,16 @@ interface DraftLine {
   confidence: number | null
   frames: number | null
   agreement: number | null
+  atMs: number | null
+  crop: number | null
+  thumb: string | null
 }
 
 let nextKey = 0
 
 function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: ReportFields) => void; onCancel: () => void }) {
   const [lines, setLines] = useState<DraftLine[]>(() =>
-    result.reads.map((r) => ({
+    result.reads.map((r, i) => ({
       key: nextKey++,
       read: r.text,
       actual: '',
@@ -378,6 +449,9 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       confidence: round(r.confidence),
       frames: r.frames,
       agreement: round(r.agreement),
+      atMs: result.captures?.[i].atMs ?? null,
+      crop: result.captures ? i : null,
+      thumb: result.captures?.[i].crop.toDataURL('image/jpeg', 0.8) ?? null,
     })),
   )
   const [scene, setScene] = useState<string[]>(() => JSON.parse(localStorage.getItem('last-scene') ?? '[]'))
@@ -406,7 +480,19 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
     setLines(lines.map((l) => (l.key === key ? { ...l, ...patch } : l)))
   /** Adds an empty "missed" line after position `at` (-1: at the top). */
   const addMissed = (at: number) => {
-    const blank: DraftLine = { key: nextKey++, read: '', actual: '', mark: null, missed: true, confidence: null, frames: null, agreement: null }
+    const blank: DraftLine = {
+      key: nextKey++,
+      read: '',
+      actual: '',
+      mark: null,
+      missed: true,
+      confidence: null,
+      frames: null,
+      agreement: null,
+      atMs: null,
+      crop: null,
+      thumb: null,
+    }
     setLines([...lines.slice(0, at + 1), blank, ...lines.slice(at + 1)])
   }
   const toggleScene = (s: string) => setScene(scene.includes(s) ? scene.filter((x) => x !== s) : [...scene, s])
@@ -425,6 +511,8 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       confidence: l.confidence,
       frames: l.frames,
       agreement: l.agreement,
+      atMs: l.atMs,
+      crop: l.crop,
     }))
     const outcome: Outcome = !readLines.length
       ? 'not_read'
@@ -440,7 +528,12 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
     <main className="report">
       <img src={image} alt="הפריים שנקרא" />
       <p className="hint">
-        {result.timeToResultMs === null ? 'לא זוהה בזמן' : `תוצאה אחרי ${(result.timeToResultMs / 1000).toFixed(1)} שניות`} ·{' '}
+        {result.captures
+          ? `${result.captures.length} נקלטו ב־${((result.durationMs ?? 0) / 1000).toFixed(0)} שניות`
+          : result.timeToResultMs === null
+            ? 'לא זוהה בזמן'
+            : `תוצאה אחרי ${(result.timeToResultMs / 1000).toFixed(1)} שניות`}{' '}
+        ·{' '}
         {result.framesRead} פריימים נקראו · {result.framesBlurry} מטושטשים
       </p>
 
@@ -469,8 +562,10 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
                   <button className={l.mark === 'wrong' ? 'bad on' : 'bad'} onClick={() => update(l.key, { mark: 'wrong' })} aria-label="לא נכון">✗</button>
                 </span>
               </div>
+              {l.thumb && <img className="thumb" src={l.thumb} alt="" />}
               <span className="meta">
-                {Math.round((l.confidence ?? 0) * 100)}% · {l.frames} פריימים · הסכמה {Math.round((l.agreement ?? 0) * 100)}%
+                {Math.round((l.confidence ?? 0) * 100)}% · {l.frames} פריימים
+                {l.atMs === null ? ` · הסכמה ${Math.round((l.agreement ?? 0) * 100)}%` : ` · אחרי ${(l.atMs / 1000).toFixed(1)} שנ׳`}
               </span>
               {l.mark === 'wrong' && (
                 <input dir="ltr" placeholder="מה כתוב באמת (לא חובה)" value={l.actual} onChange={(e) => update(l.key, { actual: e.target.value })} />
