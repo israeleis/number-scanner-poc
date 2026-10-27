@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aimRegion } from './scanner'
+import { aimRegion, wholeReads } from './scanner'
 
 describe('aimRegion', () => {
   it('a portrait video in a portrait box that fits exactly: the middle share of the whole picture', () => {
@@ -34,5 +34,16 @@ describe('aimRegion in the strip viewfinder', () => {
     const r = aimRegion(2160, 3840, 390, 300, 0.9, 0.85)
     expect(r.w).toBeCloseTo(2160 * 0.9)
     expect(r.w / r.h).toBeCloseTo(1.38, 1)
+  })
+})
+
+describe('wholeReads', () => {
+  const r = (text: string, x: number, w: number) => ({ text, box: { x, w } })
+  it('leaves out text cut by the left or right side of the box', () => {
+    const reads = [r('T7902', 0, 80), r('Contains MT7902', 40, 300), r('MF', 560, 40)]
+    expect(wholeReads(reads, 600, true).map((x) => x.text)).toEqual(['Contains MT7902'])
+  })
+  it('keeps everything with the box off', () => {
+    expect(wholeReads([r('T7902', 0, 80)], 600, false)).toHaveLength(1)
   })
 })

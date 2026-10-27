@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isRetake, LabelTracker, mergeOrder, words } from './continuous'
+import { isRetake, key, LabelTracker, mergeOrder, words } from './continuous'
 
 describe('LabelTracker', () => {
   it('starts a label once its lines are read the same way in two recent frames', () => {
@@ -7,7 +7,7 @@ describe('LabelTracker', () => {
     expect(t.feed(['Island Dogs LLC', 'Made in China']).started).toBe(false)
     const u = t.feed(['Island Dogs LLC', 'Made in China'])
     expect(u.started).toBe(true)
-    expect(t.current).toEqual(['ISLAND DOGS LLC', 'MADE IN CHINA'])
+    expect(t.current).toEqual([key('Island Dogs LLC'), key('Made in China')])
   })
 
   it('adds a line that becomes steady later to the same label, without a new start', () => {
@@ -15,8 +15,8 @@ describe('LabelTracker', () => {
     t.feed(['Island Dogs LLC'])
     t.feed(['Island Dogs LLC', 'Tracking No. 2405N22.5'])
     const u = t.feed(['Island Dogs LLC', 'Tracking No. 2405N22.5'])
-    expect(u).toEqual({ started: false, added: ['TRACKING NO. 2405N22.5'] })
-    expect(t.current).toEqual(['ISLAND DOGS LLC', 'TRACKING NO. 2405N22.5'])
+    expect(u).toEqual({ started: false, added: [key('Tracking No. 2405N22.5')] })
+    expect(t.current).toEqual([key('Island Dogs LLC'), key('Tracking No. 2405N22.5')])
   })
 
   it('a label of the same kind with another serial is a new label', () => {
@@ -26,7 +26,7 @@ describe('LabelTracker', () => {
     t.feed(['M4A1', 'SN A7310593'])
     const u = t.feed(['M4A1', 'SN A7310593'])
     expect(u.started).toBe(true)
-    expect(t.current).toEqual(['M4A1', 'SN A7310593'])
+    expect(t.current).toEqual([key('M4A1'), key('SN A7310593')])
   })
 
   it('moving off the label ends it; coming back starts it again', () => {
@@ -52,7 +52,7 @@ describe('LabelTracker', () => {
     const t = new LabelTracker(2)
     const u = t.feed([{ text: 'A7310592', confidence: 0.98 }, { text: 'MADE IN', confidence: 0.8 }], 0.95)
     expect(u.started).toBe(true)
-    expect(t.current).toEqual(['A7310592'])
+    expect(t.current).toEqual([key('A7310592')])
     expect(t.fast.has('A7310592')).toBe(true)
   })
 
@@ -65,6 +65,26 @@ describe('LabelTracker', () => {
 
   it('without voting one frame is enough', () => {
     expect(new LabelTracker(1).feed(['42']).started).toBe(true)
+  })
+})
+
+describe('LabelTracker with real reads from the phone', () => {
+  it('a serial read with O in one frame and 0 in the next is one steady line', () => {
+    const t = new LabelTracker(2)
+    t.feed([{ text: 'X1404ZA-NK101', confidence: 0.99 }, { text: 'SN:R4NOLPO28239165', confidence: 0.9 }], 0.97)
+    t.feed([{ text: 'X1404ZA-NK101', confidence: 0.99 }, { text: 'SN:R4N0LP028239165', confidence: 0.9 }], 0.97)
+    expect(t.current).toContain(key('SN:R4N0LP028239165'))
+  })
+
+  it('more lines of the same label coming into view (one with a date) do not start a new label', () => {
+    const t = new LabelTracker(2)
+    t.feed([{ text: 'X1404ZA-NK101', confidence: 0.99 }, { text: '12M', confidence: 0.99 }], 0.97)
+    const u = t.feed(
+      ['X1404ZA-NK101', 'CN:MNN2', 'MFD:2023-04', '12M'].map((text) => ({ text, confidence: 0.99 })),
+      0.97,
+    )
+    expect(u.started).toBe(false)
+    expect(u.added).toEqual([key('CN:MNN2'), key('MFD:2023-04')])
   })
 })
 

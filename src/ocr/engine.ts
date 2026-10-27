@@ -73,11 +73,13 @@ export class Engine {
   private det: ort.InferenceSession
   private rec: ort.InferenceSession
   private dict: string[]
+  private cls: ort.InferenceSession | null
 
-  private constructor(det: ort.InferenceSession, rec: ort.InferenceSession, dict: string[]) {
+  private constructor(det: ort.InferenceSession, rec: ort.InferenceSession, dict: string[], cls: ort.InferenceSession | null) {
     this.det = det
     this.rec = rec
     this.dict = dict
+    this.cls = cls
   }
 
   static async create(): Promise<Engine> {
@@ -86,14 +88,16 @@ export class Engine {
     // GitHub Pages cannot send the cross-origin isolation headers threads need.
     ort.env.wasm.numThreads = 1
     const opts: ort.InferenceSession.SessionOptions = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' }
-    const [det, rec, dictText] = await Promise.all([
+    const [det, rec, cls, dictText] = await Promise.all([
       ort.InferenceSession.create(`${BASE}models/det.onnx`, opts),
       ort.InferenceSession.create(`${BASE}models/rec.onnx`, opts),
+      // Without the direction model, doubtful lines are read both ways round instead.
+      ort.InferenceSession.create(`${BASE}models/cls.onnx`, opts).catch(() => null),
       fetch(`${BASE}models/en_dict.txt`).then((r) => r.text()),
     ])
     // The English model's classes: blank, the dictionary, then a space.
     const dict = [...dictText.split('\n').filter((l) => l.length > 0), ' ']
-    const engine = new Engine(det, rec, dict)
+    const engine = new Engine(det, rec, dict, cls)
     engine.loadMs = Math.round(performance.now() - t0)
     return engine
   }
@@ -106,15 +110,19 @@ export class Engine {
     const t1 = performance.now()
     let recs = 0
     const reads: TextRead[] = []
-    for (const box of boxes) {
-      // The box is straightened along its own slant, so text at any angle reaches the model level.
-      // The slant does not tell which end is the start: a doubtful read is tried upside down too.
-      let best = { ...(await this.recognize(canvas, box, false)), flipped: false }
+    // The straightened box does not tell which end of the line is the start. PaddleOCR's direction
+    // model says, for all boxes in one go, whether each is upside down; only when it is unsure, and
+    // the first read is doubtful too, is the line also read the other way round.
+    const upsideDown = await this.directions(canvas, boxes)
+    for (const [i, box] of boxes.entries()) {
+      const dir = upsideDown[i]
+      const first = dir === null ? false : dir.flipped
+      let best = { ...(await this.recognize(canvas, box, first)), flipped: first }
       recs++
-      if (best.confidence < 0.9) {
+      if (best.confidence < 0.9 && (dir === null || dir.sure < 0.9)) {
         recs++
-        const r = await this.recognize(canvas, box, true)
-        if (r.confidence > best.confidence) best = { ...r, flipped: true }
+        const r = await this.recognize(canvas, box, !first)
+        if (r.confidence > best.confidence) best = { ...r, flipped: !first }
       }
       const rotation = Math.round((box.angle * 180) / Math.PI + (best.flipped ? 180 : 0))
       if (best.text && best.confidence >= options.minConfidence) {
@@ -142,6 +150,31 @@ export class Engine {
     const out = await this.det.run({ [this.det.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, h, w]) })
     const prob = out[this.det.outputNames[0]].data as Float32Array
     return dbBoxes(prob, w, h, canvas.width / w, canvas.height / h)
+  }
+
+  /**
+   * For each box: upside down or not, and how sure (0.5-1). The model takes lines 48 x 192 pixels,
+   * shorter ones padded. Null per box without the model.
+   */
+  private async directions(canvas: HTMLCanvasElement, boxes: Box[]): Promise<({ flipped: boolean; sure: number } | null)[]> {
+    if (!this.cls || !boxes.length) return boxes.map(() => null)
+    const H = 48
+    const W = 192
+    const input = new Float32Array(boxes.length * 3 * H * W)
+    for (const [n, box] of boxes.entries()) {
+      const w = Math.min(W, Math.max(8, Math.ceil((H * box.length) / box.thickness)))
+      const px = drawStraightened(canvas, box, w, H, false)
+      const base = n * 3 * H * W
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4
+          for (let c = 0; c < 3; c++) input[base + c * H * W + y * W + x] = (px[i + (2 - c)] / 255 - 0.5) / 0.5
+        }
+      }
+    }
+    const out = await this.cls.run({ [this.cls.inputNames[0]]: new ort.Tensor('float32', input, [boxes.length, 3, H, W]) })
+    const p = out[this.cls.outputNames[0]].data as Float32Array
+    return boxes.map((_, n) => ({ flipped: p[n * 2 + 1] > p[n * 2], sure: Math.max(p[n * 2], p[n * 2 + 1]) }))
   }
 
   private async recognize(canvas: HTMLCanvasElement, box: Box, flipped: boolean) {

@@ -67,6 +67,17 @@ export interface FrameLog {
   boxes?: number
   recs?: number
   reads?: string[]
+  /** Reads left out because they were cut by the side of the aiming box. */
+  cut?: string[]
+}
+
+/**
+ * Reads whose text runs into the left or right side of the aiming box are cut words ("T7902" of
+ * "MT7902"): they are left out. With the box off, the whole picture is read and nothing is cut.
+ */
+export function wholeReads<T extends { box: { x: number; w: number } }>(reads: T[], width: number, aimBox: boolean): T[] {
+  if (!aimBox) return reads
+  return reads.filter((r) => r.box.x > 1 && r.box.x + r.box.w < width - 1)
 }
 
 /** Keeps the first frames of a long run (a continuous run can read thousands). */
@@ -205,14 +216,16 @@ export async function runScan(
     const tPre = performance.now()
     const processed = s.preprocess ? processedCopy(frame) : null
     const preMs = Math.round(performance.now() - tPre)
-    const frameReads = await engine.read(processed ?? frame, {
+    const allReads = await engine.read(processed ?? frame, {
       detLimit: s.detLimit,
       minConfidence: s.minConfidence,
       maxBoxes: 12,
     })
+    const frameReads = wholeReads(allReads, frame.width, s.aimBox)
+    const cut = allReads.filter((r) => !frameReads.includes(r)).map((r) => r.text)
     framesRead++
     sharpSum += sharp
-    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: frameReads.map((r) => r.text) })
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: frameReads.map((r) => r.text), cut })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: frameReads, region, scale })
     if (frameReads.length) {
       framesWithText++

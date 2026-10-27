@@ -10,6 +10,7 @@ import {
   processedCopy,
   sharpnessOf,
   type FrameLog,
+  wholeReads,
   type Focuser,
   type ScanProgress,
 } from './scanner'
@@ -32,7 +33,16 @@ export interface Capture {
 /** A line split into words, each one searchable on its own. */
 export const words = (line: string) => line.split(/\s+/).filter(Boolean)
 
-const key = (t: string) => t.toUpperCase().replace(/\s+/g, ' ').trim()
+/**
+ * What two reads of a line are compared by: case, spaces and the characters the model swaps between
+ * frames (letter O and digit 0, I / l and 1) do not count. SN:R4NOLPO28 and SN:R4N0LP028 are one line.
+ */
+export const key = (t: string) =>
+  t
+    .replace(/[Il|]/g, '1')
+    .toUpperCase()
+    .replace(/O/g, '0')
+    .replace(/\s+/g, '')
 const isIdentity = (t: string) => (t.match(/[0-9]/g) ?? []).length >= 4
 
 /**
@@ -84,8 +94,8 @@ export interface TrackerUpdate {
  * of the last `window` frames. The steady lines belong to the current label, until:
  * - no steady line was seen for `gap` frames (the camera moved off the label), or
  * - fewer than half of the steady lines are in the current label (another label), or
- * - a new number of 4+ digits appears while the label already has one (same kind of label,
- *   different serial).
+ * - a new number of 4+ digits appears and none of the label's own numbers is still in view (same
+ *   kind of label, different serial).
  * Then the next steady lines start a new label. Exact sameness, not similarity: neighbouring
  * serials differ by one character.
  */
@@ -127,7 +137,12 @@ export class LabelTracker {
     this.emptyFrames = 0
     const cur = this.current
     const known = cur ? steady.filter((k) => cur.includes(k)).length : 0
-    const newIdentity = cur !== null && cur.some(isIdentity) && steady.some((k) => isIdentity(k) && !cur.includes(k))
+    // A new number while none of the label's numbers is in view any more: the next label.
+    const newIdentity =
+      cur !== null &&
+      cur.some(isIdentity) &&
+      steady.some((k) => isIdentity(k) && !cur.includes(k)) &&
+      !steady.some((k) => isIdentity(k) && cur.includes(k))
     if (!cur || known < steady.length / 2 || newIdentity) {
       this.current = steady
       // Lines seen before the switch must be seen again to count for the new label.
@@ -237,14 +252,16 @@ export async function runContinuous(
     const tPre = performance.now()
     const input = s.preprocess ? processedCopy(frame) : frame
     const preMs = Math.round(performance.now() - tPre)
-    const reads = await engine.read(input, {
+    const allReads = await engine.read(input, {
       detLimit: s.detLimit,
       minConfidence: s.minConfidence,
       maxBoxes: 12,
     })
+    const reads = wholeReads(allReads, frame.width, s.aimBox)
+    const cut = allReads.filter((r) => !reads.includes(r)).map((r) => r.text)
     framesRead++
     sharpSum += sharp
-    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: reads.map((r) => r.text) })
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: reads.map((r) => r.text), cut })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: reads, region, scale: frame.width / region.w })
     const update = tracker.feed(reads, s.fastConfidence)
     if (tracker.current) lastSeen = performance.now()
