@@ -26,7 +26,7 @@ for (const dir of dirs.sort()) {
   r.scene ??= []
   // Scans from my own test runs (headless browser, or the Pixel 7 the tests pretend to be).
   if (/HeadlessChrome|Pixel 7\b/.test(r.device)) continue
-  console.log(`\n=== ${r.createdAt} ${r.mode} ${r.setup} zoom ${r.zoom} ${r.resolution} camera "${r.camera}" minFocus ${r.cameraMinFocus}`)
+  console.log(`\n=== ${r.createdAt} ${r.mode} ${r.setup} backend ${r.backend ?? 'wasm'} (load ${r.modelLoadMs} ms, gpu warm ${r.gpuWarmMs ?? '-'} ms) zoom ${r.zoom} ${r.resolution} camera "${r.camera}" minFocus ${r.cameraMinFocus}`)
   console.log(`    ${dir}`)
   console.log(`    outcome ${r.outcome}; ${r.lines.length} lines; duration ${r.durationMs ?? r.timeToResultMs} ms; frames read ${r.framesRead}, blurry ${r.framesBlurry}; merged retakes ${r.merged ?? '-'}; scene ${r.scene.join(', ')}; notes: ${r.notes}`)
   const byItem = new Map()

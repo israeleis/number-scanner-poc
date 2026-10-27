@@ -61,6 +61,9 @@ export interface ScanRecord {
   sharpness: number
   timeToResultMs: number | null
   modelLoadMs: number
+  /** Where the models ran, and (graphics processor) the time to build its programs at load. */
+  backend: 'webgpu' | 'wasm'
+  gpuWarmMs: number
   scene: string[]
   notes: string
   device: string

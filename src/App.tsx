@@ -43,6 +43,8 @@ export default function App() {
   const [hwApplied, setHwApplied] = useState<string[]>([])
   const [torch, setTorchState] = useState(false)
   const [cameras, setCameras] = useState<CameraChoice[]>(() => cachedProbe() ?? [])
+  /** Bumped to open the camera again after it failed. */
+  const [cameraRetry, setCameraRetry] = useState(0)
   /** Bumped to look at the cameras again. */
   const [probeRun, setProbeRun] = useState(0)
   const [scanning, setScanning] = useState(false)
@@ -77,9 +79,22 @@ export default function App() {
   }, [settings.scriptUrl, settings.scriptKey, refreshScans])
 
   useEffect(() => {
-    loadEngine().then(setEngine, (e) => setEngineError(String(e)))
     refreshScans()
   }, [refreshScans])
+
+  // The models load for the main processor or the graphics processor, as the switch says.
+  useEffect(() => {
+    let cancelled = false
+    setEngine(null)
+    setEngineError('')
+    loadEngine(settings.gpu).then(
+      (e) => !cancelled && setEngine(e),
+      (e) => !cancelled && setEngineError(String(e)),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [settings.gpu])
 
   // Retry sending every 30 seconds and when the network comes back.
   useEffect(() => {
@@ -129,7 +144,7 @@ export default function App() {
       setTrack(null)
       setTorchState(false)
     }
-  }, [screen, settings.cameraId, settings.cameraHeight, probeRun])
+  }, [screen, settings.cameraId, settings.cameraHeight, probeRun, cameraRetry])
 
   useEffect(() => {
     if (track) setHardware(track, settings.hardware, settings.exposureComp).then(setHwApplied)
@@ -137,7 +152,8 @@ export default function App() {
 
   // Focus search counts only where the phone lets the site move the lens.
   const sweeping = settings.focusSweep && canSweepFocus(caps)
-  const setup = setupName({ ...settings, focusSweep: sweeping }, torch)
+  // G1 only when the graphics processor is really in use (the phone may not offer WebGPU).
+  const setup = setupName({ ...settings, focusSweep: sweeping, gpu: engine?.backend === 'webgpu' }, torch)
   const setupCount = scans.filter((s) => s.record.setup === setup).length
 
   /** One focus search per open camera, so it remembers the last good focus between scans. */
@@ -265,6 +281,8 @@ export default function App() {
       sharpness: result.sharpness,
       timeToResultMs: result.timeToResultMs,
       modelLoadMs: engine?.loadMs ?? 0,
+      backend: engine?.backend ?? 'wasm',
+      gpuWarmMs: engine?.warmMs ?? 0,
       device: navigator.userAgent,
       resolution: track ? trackResolution(track) : '',
       aimBox: settings.aimBox,
@@ -340,14 +358,28 @@ export default function App() {
               </div>
             )}
           </div>
-          {cameraError && <p className="error">המצלמה לא נפתחה: {cameraError}</p>}
+          {cameraError && (
+            <p className="error">
+              המצלמה לא נפתחה: {cameraError}
+              {/NotReadable/.test(cameraError) && ' (מצלמה תפוסה: סגור טאבים אחרים של האפליקציה)'}{' '}
+              <button onClick={() => setCameraRetry((n) => n + 1)}>פתח מצלמה שוב</button>
+            </p>
+          )}
           {engineError && <p className="error">המודל לא נטען: {engineError}</p>}
-          {!engine && !engineError && <p className="hint">טוען את מודל הזיהוי… (רק בפעם הראשונה זה לוקח זמן)</p>}
+          {!engine && !engineError && (
+            <p className="hint">
+              {settings.gpu ? 'מכין את המעבד הגרפי…' : 'טוען את מודל הזיהוי…'} (רק בפעם הראשונה זה לוקח זמן)
+            </p>
+          )}
+          {engine && settings.gpu && engine.backend !== 'webgpu' && (
+            <p className="hint">הטלפון לא מאפשר מעבד גרפי לאתרים: הזיהוי רץ על המעבד הרגיל.</p>
+          )}
 
           <div className="toggles">
             <Toggle label="עיבוד תמונה" on={settings.preprocess} set={(v) => setSettings({ ...settings, preprocess: v })} />
             <Toggle label="בקרת מצלמה" on={settings.hardware} set={(v) => setSettings({ ...settings, hardware: v })} />
             <Toggle label="הצבעה" on={settings.voting} set={(v) => setSettings({ ...settings, voting: v })} />
+            <Toggle label="מעבד גרפי" on={settings.gpu} set={(v) => setSettings({ ...settings, gpu: v })} />
             {canSweepFocus(caps) && (
               <Toggle label="חיפוש פוקוס" on={settings.focusSweep} set={(v) => setSettings({ ...settings, focusSweep: v })} />
             )}

@@ -21,6 +21,8 @@ export interface Settings {
   cameraId: string
   /** Search for the sharpest focus when a scan starts (phones that let the site move the lens). */
   focusSweep: boolean
+  /** Run the models on the graphics processor (WebGPU) where the browser offers it. */
+  gpu: boolean
   /** Mark ✓/✗ on the phone after each scan; off: everything is sent unmarked and checked later. */
   review: boolean
   /** Continuous scanning: a line read with at least this confidence counts at once (no second frame). */
@@ -53,6 +55,7 @@ export const defaults: Settings = {
   focusSettleFrames: 1,
   fastConfidence: 0.97,
   review: false,
+  gpu: false,
   viewZoom: 2,
   mode: 'single',
 }
@@ -85,7 +88,7 @@ export function saveSettings(s: Settings) {
   localStorage.setItem(KEY, JSON.stringify({ ...s, version: VERSION }))
 }
 
-/** Short name of the active combination, e.g. "P1 H0 V1 F1 T1". Torch is part of it. */
-export function setupName(s: Pick<Settings, 'preprocess' | 'hardware' | 'voting' | 'focusSweep'>, torch: boolean): string {
-  return `P${+s.preprocess} H${+s.hardware} V${+s.voting} F${+s.focusSweep} T${+torch}`
+/** Short name of the active combination, e.g. "P1 H0 V1 F1 T1 G0". Torch is part of it. */
+export function setupName(s: Pick<Settings, 'preprocess' | 'hardware' | 'voting' | 'focusSweep' | 'gpu'>, torch: boolean): string {
+  return `P${+s.preprocess} H${+s.hardware} V${+s.voting} F${+s.focusSweep} T${+torch} G${+s.gpu}`
 }

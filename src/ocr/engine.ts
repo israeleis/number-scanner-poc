@@ -1,6 +1,6 @@
-// PaddleOCR in the browser: PP-OCRv4 text detection (DB) and PP-OCRv3 English recognition (CTC),
-// both run with ONNX Runtime Web on WebAssembly.
-import * as ort from 'onnxruntime-web/wasm'
+// PaddleOCR in the browser: PP-OCRv4 text detection (DB), the direction model and PP-OCRv3 English
+// recognition (CTC), run with ONNX Runtime Web on WebAssembly, or on the graphics processor (WebGPU).
+import type * as Ort from 'onnxruntime-web'
 import { cleanDigits, ctcDecode } from './ctc'
 
 const BASE = import.meta.env.BASE_URL
@@ -51,11 +51,21 @@ export interface OcrOptions {
   maxBoxes: number
 }
 
-let loading: Promise<Engine> | null = null
+const loading = new Map<boolean, Promise<Engine>>()
 
-export function loadEngine(): Promise<Engine> {
-  if (!loading) loading = Engine.create()
-  return loading
+/** `gpu`: run the models on the graphics processor where the browser offers WebGPU. */
+export function loadEngine(gpu = false): Promise<Engine> {
+  if (!loading.has(gpu)) loading.set(gpu, Engine.create(gpu))
+  return loading.get(gpu)!
+}
+
+async function hasWebGpu(): Promise<boolean> {
+  const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu
+  try {
+    return !!gpu && !!(await gpu.requestAdapter())
+  } catch {
+    return false
+  }
 }
 
 /** Where the time of the last `read` went, for studying speed. */
@@ -67,27 +77,49 @@ export interface ReadStats {
   recs: number
 }
 
+type OrtModule = typeof Ort
+
 export class Engine {
   loadMs = 0
+  /** Where the models run: 'webgpu' (graphics processor) or 'wasm' (main processor). */
+  backend: 'webgpu' | 'wasm' = 'wasm'
+  /** On the graphics processor: time of the first run of each model (building its programs). */
+  warmMs = 0
   last: ReadStats = { detMs: 0, recMs: 0, boxes: 0, recs: 0 }
-  private det: ort.InferenceSession
-  private rec: ort.InferenceSession
+  private ort: OrtModule
+  private det: Ort.InferenceSession
+  private rec: Ort.InferenceSession
   private dict: string[]
-  private cls: ort.InferenceSession | null
+  private cls: Ort.InferenceSession | null
 
-  private constructor(det: ort.InferenceSession, rec: ort.InferenceSession, dict: string[], cls: ort.InferenceSession | null) {
+  private constructor(
+    ort: OrtModule,
+    det: Ort.InferenceSession,
+    rec: Ort.InferenceSession,
+    dict: string[],
+    cls: Ort.InferenceSession | null,
+  ) {
+    this.ort = ort
     this.det = det
     this.rec = rec
     this.dict = dict
     this.cls = cls
   }
 
-  static async create(): Promise<Engine> {
+  static async create(gpu: boolean): Promise<Engine> {
     const t0 = performance.now()
-    ort.env.wasm.wasmPaths = { wasm: `${BASE}ort/ort-wasm-simd-threaded.wasm` }
+    const useGpu = gpu && (await hasWebGpu())
+    // Two builds of the runtime: the WebGPU one carries its own (larger) WebAssembly file.
+    const ort: OrtModule = useGpu ? await import('onnxruntime-web/webgpu') : await import('onnxruntime-web/wasm')
+    ort.env.wasm.wasmPaths = {
+      wasm: `${BASE}ort/${useGpu ? 'ort-wasm-simd-threaded.jsep.wasm' : 'ort-wasm-simd-threaded.wasm'}`,
+    }
     // GitHub Pages cannot send the cross-origin isolation headers threads need.
     ort.env.wasm.numThreads = 1
-    const opts: ort.InferenceSession.SessionOptions = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' }
+    const opts: Ort.InferenceSession.SessionOptions = {
+      executionProviders: useGpu ? ['webgpu', 'wasm'] : ['wasm'],
+      graphOptimizationLevel: 'all',
+    }
     const [det, rec, cls, dictText] = await Promise.all([
       ort.InferenceSession.create(`${BASE}models/det.onnx`, opts),
       ort.InferenceSession.create(`${BASE}models/rec.onnx`, opts),
@@ -97,7 +129,23 @@ export class Engine {
     ])
     // The English model's classes: blank, the dictionary, then a space.
     const dict = [...dictText.split('\n').filter((l) => l.length > 0), ' ']
-    const engine = new Engine(det, rec, dict, cls)
+    const engine = new Engine(ort, det, rec, dict, cls)
+    engine.backend = useGpu ? 'webgpu' : 'wasm'
+    if (useGpu) {
+      // The graphics processor builds its programs on a model's first run: do it now, not in a scan.
+      const t1 = performance.now()
+      const c = document.createElement('canvas')
+      c.width = 640
+      c.height = 448
+      const ctx = c.getContext('2d')!
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, c.width, c.height)
+      ctx.fillStyle = '#000'
+      ctx.font = 'bold 40px sans-serif'
+      ctx.fillText('WARM 1234', 40, 200)
+      await engine.read(c, { detLimit: 640, minConfidence: 0, maxBoxes: 4 })
+      engine.warmMs = Math.round(performance.now() - t1)
+    }
     engine.loadMs = Math.round(performance.now() - t0)
     return engine
   }
@@ -147,7 +195,7 @@ export class Engine {
         input[c * w * h + i] = (px[i * 4 + (2 - c)] / 255 - mean[c]) / std[c]
       }
     }
-    const out = await this.det.run({ [this.det.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, h, w]) })
+    const out = await this.det.run({ [this.det.inputNames[0]]: new this.ort.Tensor('float32', input, [1, 3, h, w]) })
     const prob = out[this.det.outputNames[0]].data as Float32Array
     return joinLineParts(dbBoxes(prob, w, h, canvas.width / w, canvas.height / h))
   }
@@ -172,20 +220,26 @@ export class Engine {
         }
       }
     }
-    const out = await this.cls.run({ [this.cls.inputNames[0]]: new ort.Tensor('float32', input, [boxes.length, 3, H, W]) })
+    const out = await this.cls.run({ [this.cls.inputNames[0]]: new this.ort.Tensor('float32', input, [boxes.length, 3, H, W]) })
     const p = out[this.cls.outputNames[0]].data as Float32Array
     return boxes.map((_, n) => ({ flipped: p[n * 2 + 1] > p[n * 2], sure: Math.max(p[n * 2], p[n * 2 + 1]) }))
   }
 
   private async recognize(canvas: HTMLCanvasElement, box: Box, flipped: boolean) {
     const H = 48
-    const W = Math.min(640, Math.max(16, Math.ceil((H * box.length) / box.thickness)))
-    const px = drawStraightened(canvas, box, W, H, flipped)
+    const w = Math.min(640, Math.max(16, Math.ceil((H * box.length) / box.thickness)))
+    // The graphics processor builds programs per input size: widths are rounded up to steps of 64
+    // (the rest left blank, as PaddleOCR pads), so a few sizes cover every line.
+    const W = this.backend === 'webgpu' ? Math.min(640, Math.ceil(w / 64) * 64) : w
+    const px = drawStraightened(canvas, box, w, H, flipped)
     const input = new Float32Array(3 * W * H)
-    for (let i = 0; i < W * H; i++) {
-      for (let c = 0; c < 3; c++) input[c * W * H + i] = (px[i * 4 + (2 - c)] / 255 - 0.5) / 0.5
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4
+        for (let c = 0; c < 3; c++) input[c * W * H + y * W + x] = (px[i + (2 - c)] / 255 - 0.5) / 0.5
+      }
     }
-    const out = await this.rec.run({ [this.rec.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, H, W]) })
+    const out = await this.rec.run({ [this.rec.inputNames[0]]: new this.ort.Tensor('float32', input, [1, 3, H, W]) })
     const t = out[this.rec.outputNames[0]]
     const [, steps, classes] = t.dims
     return ctcDecode(t.data as Float32Array, steps, classes, this.dict)
