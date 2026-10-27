@@ -3,8 +3,11 @@ import type { FrameLog } from './scanner'
 // Scans are kept on the phone (IndexedDB) and sent to the Apps Script web app when it is set up
 // and the network is up. A scan is marked sent only after the script confirms it.
 
-/** correct: every line right and none missed. not_read: no text read at all. */
-export type Outcome = 'correct' | 'wrong' | 'not_read'
+/**
+ * correct: every line right and none missed. not_read: no text read at all.
+ * unchecked: sent without marking on the phone, to be checked from the pictures.
+ */
+export type Outcome = 'correct' | 'wrong' | 'not_read' | 'unchecked'
 
 export interface Line {
   /** 1 is the top line. */
@@ -13,7 +16,7 @@ export interface Line {
   read: string
   /** What is really written (optional for a right read). */
   actual: string
-  outcome: 'correct' | 'wrong' | 'missed'
+  outcome: 'correct' | 'wrong' | 'missed' | 'unchecked'
   confidence: number | null
   frames: number | null
   agreement: number | null

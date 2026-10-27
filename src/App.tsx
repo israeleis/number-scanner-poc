@@ -51,6 +51,8 @@ export default function App() {
   /** Texts written down so far in a continuous run, newest first. */
   const [live, setLive] = useState<Capture[]>([])
   const audioRef = useRef<AudioContext | null>(null)
+  /** After a scan sent without marking: how many lines it had (shown until the next scan). */
+  const [saved, setSaved] = useState<number | null>(null)
   /** The last focus search of the running scan, shown to the tester. */
   const [focusNow, setFocusNow] = useState<FocusSweep | null>(null)
   const [scans, setScans] = useState<StoredScan[]>([])
@@ -159,6 +161,8 @@ export default function App() {
     stopRef.current = { stopped: false }
     setScanning(true)
     setProgress(null)
+    setSaved(null)
+    let scanned: ScanResult
     try {
       const search = focusSearch()
       const focuser = search ? (measure: () => number, force?: boolean) => search.find(measure, force) : null
@@ -187,7 +191,7 @@ export default function App() {
           focuser,
           setFocusNow,
         )
-        setResult({
+        scanned = {
           reads: run.captures.flatMap((c) =>
             c.lines.map((text) => ({ text, confidence: c.confidence, frames: 0, agreement: 1, x: 0, y: 0, h: 0 })),
           ),
@@ -202,11 +206,18 @@ export default function App() {
           frameLog: run.frameLog,
           captures: run.captures.flatMap((c, item) => c.lines.map((_, i) => ({ crop: c.crop, atMs: c.atMs, item, fast: c.fast[i] }))),
           durationMs: run.durationMs,
-        })
+        }
       } else {
-        setResult(await runScan(videoRef.current, engine, settings, setProgress, stopRef.current, focuser, setFocusNow))
+        scanned = await runScan(videoRef.current, engine, settings, setProgress, stopRef.current, focuser, setFocusNow)
       }
-      setScreen('report')
+      if (settings.review) {
+        setResult(scanned)
+        setScreen('report')
+      } else {
+        // No marking on the phone: everything is sent as it is and checked later from the pictures.
+        await saveReport(uncheckedFields(scanned), scanned)
+        setSaved(scanned.reads.length)
+      }
     } finally {
       setScanning(false)
       // Back to the phone's own autofocus between scans.
@@ -214,7 +225,8 @@ export default function App() {
     }
   }
 
-  async function saveReport(fields: ReportFields) {
+  async function saveReport(fields: ReportFields, scanned: ScanResult | null = result) {
+    const result = scanned
     if (!result) return
     const toBlob = (c: HTMLCanvasElement) =>
       new Promise<Blob>((res) => c.toBlob((b) => res(b!), 'image/jpeg', 0.9))
@@ -375,7 +387,7 @@ export default function App() {
                 </p>
               )}
               <button className="big stop" onClick={() => (stopRef.current.stopped = true)}>
-                {settings.mode === 'continuous' ? `סיים ובדוק (${live.length})` : 'עצור'}
+                {settings.mode === 'continuous' ? `${settings.review ? 'סיים ובדוק' : 'סיים ושלח'} (${live.length})` : 'עצור'}
               </button>
               {settings.mode === 'continuous' && (
                 <ol className="live" reversed>
@@ -388,9 +400,12 @@ export default function App() {
               )}
             </>
           ) : (
-            <button className="big" disabled={!engine || !track} onClick={startScan}>
-              {settings.mode === 'continuous' ? 'התחל סריקה רציפה' : 'סרוק'}
-            </button>
+            <>
+              <button className="big" disabled={!engine || !track} onClick={startScan}>
+                {settings.mode === 'continuous' ? 'התחל סריקה רציפה' : 'סרוק'}
+              </button>
+              {saved !== null && <p className="saved">✓ נשמר ונשלח ({saved} שורות)</p>}
+            </>
           )}
         </main>
       )}
@@ -423,6 +438,31 @@ export default function App() {
 }
 
 const round = (n: number) => Math.round(n * 1000) / 1000
+
+/** A scan saved without marking: every line "unchecked", to be checked later from the pictures. */
+function uncheckedFields(r: ScanResult): ReportFields {
+  const lines: Line[] = r.reads.map((read, i) => ({
+    line: i + 1,
+    read: read.text,
+    actual: '',
+    outcome: 'unchecked',
+    confidence: round(read.confidence),
+    frames: r.captures ? null : read.frames,
+    agreement: r.captures ? null : round(read.agreement),
+    words: words(read.text),
+    fast: r.captures?.[i].fast ?? null,
+    item: r.captures ? r.captures[i].item + 1 : null,
+    atMs: r.captures?.[i].atMs ?? null,
+    crop: r.captures?.[i].item ?? null,
+  }))
+  return {
+    outcome: lines.length ? 'unchecked' : 'not_read',
+    summary: lines.map((l) => l.read).join(' | '),
+    lines,
+    scene: JSON.parse(localStorage.getItem('last-scene') ?? '[]'),
+    notes: '',
+  }
+}
 
 /** Lines top to bottom, each line's words as separate chips. */
 function Lines({ lines }: { lines: string[] }) {
@@ -789,6 +829,11 @@ function SettingsScreen({
         לקרוא רק את המסגרת שבאמצע המסך (טקסט קטן נקרא טוב יותר)
       </label>
 
+      <label className="check">
+        <input type="checkbox" checked={s.review} onChange={(e) => setSettings({ ...s, review: e.target.checked })} />
+        לסמן ✓/✗ בטלפון אחרי כל סריקה (כבוי: הכל נשלח כמו שהוא ונבדק אחר כך מהתמונות)
+      </label>
+
       <h2>זיהוי</h2>
       <NumberField label="פריימים להצבעה" value={s.voteFrames} set={(n) => setSettings({ ...s, voteFrames: n })} />
       <NumberField label="סף טשטוש (פריים מתחת לזה לא נקרא)" value={s.blurThreshold} set={(n) => setSettings({ ...s, blurThreshold: n })} />
@@ -818,7 +863,7 @@ function SettingsScreen({
 }
 
 function Log({ scans, onSync, onBack }: { scans: StoredScan[]; onSync: () => void; onBack: () => void }) {
-  const label: Record<Outcome, string> = { correct: '✓', wrong: '✗', not_read: '—' }
+  const label: Record<Outcome, string> = { correct: '✓', wrong: '✗', not_read: '—', unchecked: '·' }
   return (
     <main className="log">
       <button className="link" onClick={onBack}>→ חזרה לסריקה</button>

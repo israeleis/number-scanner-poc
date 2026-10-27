@@ -114,3 +114,4 @@ select { width: 100%; padding: 10px; margin-top: 4px; border-radius: 8px; border
 .last-capture .lines { flex: 1; }
 .last-capture .word { font-size: 17px; }
 .label-head { margin: 14px 0 4px; padding-top: 8px; border-top: 2px solid #333; }
+.saved { color: #00e676; text-align: center; font-weight: 600; margin: 6px 0; }
