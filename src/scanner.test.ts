@@ -28,3 +28,11 @@ describe('aimRegion with magnification', () => {
     expect(b.y + b.h / 2).toBeCloseTo(540)
   })
 })
+
+describe('aimRegion in the strip viewfinder', () => {
+  it('a portrait 4K video in a 1.8:1 strip: the box spans most of the width, 2:1', () => {
+    const r = aimRegion(2160, 3840, 360, 200, 0.9, 0.81)
+    expect(r.w).toBeCloseTo(2160 * 0.9)
+    expect(r.w / r.h).toBeCloseTo(2, 1)
+  })
+})

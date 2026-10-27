@@ -271,7 +271,7 @@ export default function App() {
               </button>
             ))}
           </div>
-          <div className="viewfinder">
+          <div className={settings.aimBox ? 'viewfinder strip' : 'viewfinder'}>
             <video ref={videoRef} playsInline muted style={{ transform: `scale(${settings.viewZoom})` }} />
             {settings.aimBox && (
               <div className="aim" style={{ width: `${AIM_W * 100}%`, height: `${AIM_H * 100}%` }} />

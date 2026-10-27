@@ -14,8 +14,10 @@ export interface Region {
 }
 
 /** Share of the visible picture's width and height the aiming box covers. */
-export const AIM_W = 0.8
-export const AIM_H = 0.3
+// The viewfinder is a strip shaped like the box with a small margin around it (see index.css):
+// 1.8 : 1, so the box is 2 : 1.
+export const AIM_W = 0.9
+export const AIM_H = 0.81
 
 /** Video-to-screen scale: object-fit: cover, then the app's own magnification. */
 export function displayScale(videoW: number, videoH: number, elW: number, elH: number, zoom: number): number {
