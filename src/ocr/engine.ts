@@ -112,7 +112,7 @@ export class Engine {
     // Two builds of the runtime: the WebGPU one carries its own (larger) WebAssembly file.
     const ort: OrtModule = useGpu ? await import('onnxruntime-web/webgpu') : await import('onnxruntime-web/wasm')
     ort.env.wasm.wasmPaths = {
-      wasm: `${BASE}ort/${useGpu ? 'ort-wasm-simd-threaded.jsep.wasm' : 'ort-wasm-simd-threaded.wasm'}`,
+      wasm: `${BASE}ort/${useGpu ? 'ort-wasm-simd-threaded.asyncify.wasm' : 'ort-wasm-simd-threaded.wasm'}`,
     }
     // GitHub Pages cannot send the cross-origin isolation headers threads need.
     ort.env.wasm.numThreads = 1
@@ -120,15 +120,15 @@ export class Engine {
       executionProviders: useGpu ? ['webgpu', 'wasm'] : ['wasm'],
       graphOptimizationLevel: 'all',
     }
-    const [det, rec, cls, dictText] = await Promise.all([
-      ort.InferenceSession.create(`${BASE}models/det.onnx`, opts),
-      ort.InferenceSession.create(`${BASE}models/rec.onnx`, opts),
-      // Without the direction model, doubtful lines are read both ways round instead.
-      ort.InferenceSession.create(`${BASE}models/cls.onnx`, opts).catch(() => null),
-      fetch(`${BASE}models/en_dict.txt`).then((r) => r.text()),
-    ])
+    const create = (name: string) => ort.InferenceSession.create(`${BASE}models/${name}.onnx`, opts)
+    const dictText = fetch(`${BASE}models/en_dict.txt`).then((r) => r.text())
+    // WebGPU builds one model at a time; on the main processor they load together.
+    // Without the direction model, doubtful lines are read both ways round instead.
+    const [det, rec, cls] = useGpu
+      ? [await create('det'), await create('rec'), await create('cls').catch(() => null)]
+      : await Promise.all([create('det'), create('rec'), create('cls').catch(() => null)])
     // The English model's classes: blank, the dictionary, then a space.
-    const dict = [...dictText.split('\n').filter((l) => l.length > 0), ' ']
+    const dict = [...(await dictText).split('\n').filter((l) => l.length > 0), ' ']
     const engine = new Engine(ort, det, rec, dict, cls)
     engine.backend = useGpu ? 'webgpu' : 'wasm'
     if (useGpu) {
