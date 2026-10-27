@@ -23,6 +23,9 @@ import { loadSettings, saveSettings, setupName, type Settings } from './settings
 import { allScans, putScan, syncPending, testConnection, type Line, type Outcome, type StoredScan } from './store'
 
 declare const __BUILD__: string
+/** Served by `npm run lab` from the computer: scans go to the computer unless a script URL is set. */
+declare const __LAB__: boolean
+const LAB_URL = `${import.meta.env.BASE_URL}api/scans`
 
 const SCENES = ['יום', 'שמש ישירה', 'צל', 'ערב', 'לילה', 'תאורה פנימית', 'סנוור', 'רחוק', 'קרוב', 'זווית', 'תנועה', 'מסך']
 
@@ -64,7 +67,7 @@ export default function App() {
   }, [])
 
   const sync = useCallback(async () => {
-    await syncPending(settings.scriptUrl, settings.scriptKey)
+    await syncPending(settings.scriptUrl || (__LAB__ ? LAB_URL : ''), settings.scriptKey)
     await refreshScans()
   }, [settings.scriptUrl, settings.scriptKey, refreshScans])
 
@@ -191,6 +194,7 @@ export default function App() {
           sharpness: run.sharpness,
           timeToResultMs: null,
           sweeps: run.sweeps,
+          frameLog: run.frameLog,
           captures: run.captures.flatMap((c, item) => c.lines.map(() => ({ crop: c.crop, atMs: c.atMs, item }))),
           durationMs: run.durationMs,
         })
@@ -249,6 +253,7 @@ export default function App() {
       cameraMinFocus: cameras.find((c) => c.label === track?.label)?.minFocus ?? null,
       focusSweep: sweeping,
       focusSweeps: result.sweeps,
+      frameLog: result.frameLog,
       cameraSupports: supportedList(caps),
       hardwareApplied: hwApplied,
       appVersion: __BUILD__,
@@ -707,6 +712,7 @@ function SettingsScreen({
     <main className="settings">
       <button className="link" onClick={onBack}>→ חזרה לסריקה</button>
       <h2>שליחה לגוגל שיטס</h2>
+      {__LAB__ && <p className="hint">רץ מהמחשב: כשהכתובת ריקה, הסריקות נשמרות במחשב.</p>}
       <label>
         כתובת הסקריפט (Web app URL)
         <input dir="ltr" value={s.scriptUrl} onChange={(e) => setSettings({ ...s, scriptUrl: e.target.value.trim() })} />
@@ -719,7 +725,7 @@ function SettingsScreen({
         onClick={async () => {
           setStatus('בודק…')
           try {
-            setStatus(await testConnection(s.scriptUrl, s.scriptKey))
+            setStatus(await testConnection(s.scriptUrl || (__LAB__ ? LAB_URL : ''), s.scriptKey))
           } catch (e) {
             setStatus(`שגיאה: ${e}`)
           }

@@ -2,7 +2,17 @@
 // once, with a beep and a short vibration, so the tester can move on to the next item.
 import type { FocusSweep } from './camera'
 import type { Engine, TextRead } from './ocr/engine'
-import { focusSharpness, frameRegion, grab, processedCopy, sharpnessOf, type Focuser, type ScanProgress } from './scanner'
+import {
+  focusSharpness,
+  frameRegion,
+  grab,
+  logFrame,
+  processedCopy,
+  sharpnessOf,
+  type FrameLog,
+  type Focuser,
+  type ScanProgress,
+} from './scanner'
 import type { Settings } from './settings'
 
 /** One label: every line read in the box together, top to bottom. */
@@ -116,7 +126,8 @@ export interface ContinuousResult {
   framesRead: number
   framesBlurry: number
   sharpness: number
-  sweeps: FocusSweep[]
+  sweeps: (FocusSweep & { at: number })[]
+  frameLog: FrameLog[]
   durationMs: number
 }
 
@@ -133,11 +144,13 @@ export async function runContinuous(
   const start = performance.now()
   const tracker = new LabelTracker(s.voting ? 2 : 1)
   const captures: Capture[] = []
-  const sweeps: FocusSweep[] = []
+  const sweeps: (FocusSweep & { at: number })[] = []
+  const frameLog: FrameLog[] = []
   const measure = () => focusSharpness(video, s)
   const sweep = async () => {
+    const at = Math.round(performance.now() - start)
     const r = focuser ? await focuser(measure) : null
-    if (r) sweeps.push(r)
+    if (r) sweeps.push({ ...r, at })
   }
   if (s.focusSweep) await sweep()
   let blurryInARow = 0
@@ -151,7 +164,9 @@ export async function runContinuous(
     const frame = grab(video, region)
     last = frame
     const sharp = sharpnessOf(frame)
+    const t = Math.round(performance.now() - start)
     if (sharp < s.blurThreshold) {
+      logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: true })
       framesBlurry++
       onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: [], region, scale: frame.width / region.w })
       // Moving to the next item blurs the picture: look for the focus again (no limit here).
@@ -163,13 +178,17 @@ export async function runContinuous(
       continue
     }
     blurryInARow = 0
-    const reads = await engine.read(s.preprocess ? processedCopy(frame) : frame, {
+    const tPre = performance.now()
+    const input = s.preprocess ? processedCopy(frame) : frame
+    const preMs = Math.round(performance.now() - tPre)
+    const reads = await engine.read(input, {
       detLimit: s.detLimit,
       minConfidence: s.minConfidence,
       maxBoxes: 12,
     })
     framesRead++
     sharpSum += sharp
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: reads.map((r) => r.text) })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: reads, region, scale: frame.width / region.w })
     const update = tracker.feed(reads.map((r) => r.text))
     if (update.added.length && tracker.current) {
@@ -201,6 +220,7 @@ export async function runContinuous(
     framesBlurry,
     sharpness: framesRead ? Math.round(sharpSum / framesRead) : 0,
     sweeps,
+    frameLog,
     durationMs: Math.round(performance.now() - start),
   }
 }

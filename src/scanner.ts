@@ -55,6 +55,25 @@ export interface ScanProgress {
   scale: number
 }
 
+/** What happened to one camera frame, for studying speed and failures. */
+export interface FrameLog {
+  /** ms since the start of the scan. */
+  t: number
+  sharp: number
+  blurry: boolean
+  preMs?: number
+  detMs?: number
+  recMs?: number
+  boxes?: number
+  recs?: number
+  reads?: string[]
+}
+
+/** Keeps the first frames of a long run (a continuous run can read thousands). */
+export function logFrame(log: FrameLog[], f: FrameLog) {
+  if (log.length < 400) log.push(f)
+}
+
 /** Moves the lens to the sharpest focus for what is in the aiming box; null when the phone cannot. */
 export type Focuser = (measure: () => number) => Promise<FocusSweep | null>
 
@@ -67,8 +86,9 @@ export interface ScanResult {
   framesBlurry: number
   sharpness: number
   timeToResultMs: number | null
-  /** Focus searches made during the scan, in order. */
-  sweeps: FocusSweep[]
+  /** Focus searches made during the scan, in order, with when each started (ms from the start). */
+  sweeps: (FocusSweep & { at: number })[]
+  frameLog: FrameLog[]
   /** Continuous scanning only: per read, its label (index), the label's picture, and when it was written down. */
   captures?: { crop: HTMLCanvasElement; atMs: number; item: number }[]
   durationMs?: number
@@ -135,13 +155,15 @@ export async function runScan(
   focuser: Focuser | null,
 ): Promise<ScanResult> {
   const start = performance.now()
-  const sweeps: FocusSweep[] = []
+  const sweeps: (FocusSweep & { at: number })[] = []
+  const frameLog: FrameLog[] = []
   // Focus is judged on the aiming box at a finer scale than the blur gate, since the text is small.
   const measure = () => focusSharpness(video, s)
   const sweep = async () => {
     if (!focuser) return
+    const at = Math.round(performance.now() - start)
     const r = await focuser(measure)
-    if (r) sweeps.push(r)
+    if (r) sweeps.push({ ...r, at })
   }
   if (s.focusSweep) await sweep()
   let blurryInARow = 0
@@ -160,7 +182,9 @@ export async function runScan(
     const frame = grab(video, region)
     last = frame
     const sharp = sharpnessOf(frame)
+    const t = Math.round(performance.now() - start)
     if (sharp < s.blurThreshold) {
+      logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: true })
       framesBlurry++
       // Still blurred: the phone or the text moved. Search again (a few times at most).
       if (s.focusSweep && ++blurryInARow >= 2 && sweeps.length < 5) {
@@ -172,7 +196,9 @@ export async function runScan(
       continue
     }
     blurryInARow = 0
+    const tPre = performance.now()
     const processed = s.preprocess ? processedCopy(frame) : null
+    const preMs = Math.round(performance.now() - tPre)
     const frameReads = await engine.read(processed ?? frame, {
       detLimit: s.detLimit,
       minConfidence: s.minConfidence,
@@ -180,6 +206,7 @@ export async function runScan(
     })
     framesRead++
     sharpSum += sharp
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: frameReads.map((r) => r.text) })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: frameReads, region, scale })
     if (frameReads.length) {
       framesWithText++
@@ -220,5 +247,6 @@ export async function runScan(
     sharpness: framesRead ? Math.round(sharpSum / framesRead) : 0,
     timeToResultMs: doneAt === null ? null : Math.round(doneAt - start),
     sweeps,
+    frameLog,
   }
 }

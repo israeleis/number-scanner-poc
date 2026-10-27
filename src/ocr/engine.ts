@@ -58,8 +58,18 @@ export function loadEngine(): Promise<Engine> {
   return loading
 }
 
+/** Where the time of the last `read` went, for studying speed. */
+export interface ReadStats {
+  detMs: number
+  recMs: number
+  /** Text boxes found, and recognitions run (a doubtful box is read twice). */
+  boxes: number
+  recs: number
+}
+
 export class Engine {
   loadMs = 0
+  last: ReadStats = { detMs: 0, recMs: 0, boxes: 0, recs: 0 }
   private det: ort.InferenceSession
   private rec: ort.InferenceSession
   private dict: string[]
@@ -89,15 +99,20 @@ export class Engine {
   }
 
   async read(canvas: HTMLCanvasElement, options: OcrOptions): Promise<TextRead[]> {
+    const t0 = performance.now()
     const boxes = (await this.detect(canvas, options.detLimit))
       .sort((a, b) => b.w * b.h - a.w * a.h)
       .slice(0, options.maxBoxes)
+    const t1 = performance.now()
+    let recs = 0
     const reads: TextRead[] = []
     for (const box of boxes) {
       // The box is straightened along its own slant, so text at any angle reaches the model level.
       // The slant does not tell which end is the start: a doubtful read is tried upside down too.
       let best = { ...(await this.recognize(canvas, box, false)), flipped: false }
+      recs++
       if (best.confidence < 0.9) {
+        recs++
         const r = await this.recognize(canvas, box, true)
         if (r.confidence > best.confidence) best = { ...r, flipped: true }
       }
@@ -106,6 +121,7 @@ export class Engine {
         reads.push({ text: best.text, confidence: best.confidence, box, rotation })
       }
     }
+    this.last = { detMs: Math.round(t1 - t0), recMs: Math.round(performance.now() - t1), boxes: boxes.length, recs }
     return reads.sort((a, b) => (Math.abs(a.box.cy - b.box.cy) < a.box.h / 2 ? a.box.cx - b.box.cx : a.box.cy - b.box.cy))
   }
 

@@ -1,3 +1,5 @@
+import type { FrameLog } from './scanner'
+
 // Scans are kept on the phone (IndexedDB) and sent to the Apps Script web app when it is set up
 // and the network is up. A scan is marked sent only after the script confirms it.
 
@@ -63,8 +65,10 @@ export interface ScanRecord {
   /** The closest that camera can focus, in metres (null: unknown). */
   cameraMinFocus: number | null
   focusSweep: boolean
-  /** Each focus search: chosen distance (metres), sharpness, time, and every step. */
-  focusSweeps: { distance: number; sharpness: number; ms: number; samples: [number, number][] }[]
+  /** Each focus search: when it started, chosen distance (metres), sharpness, time, and every step. */
+  focusSweeps: { at: number; distance: number; sharpness: number; ms: number; kind: string; samples: [number, number][] }[]
+  /** Every camera frame of the scan (first 400): time, sharpness, and where the reading time went. */
+  frameLog: FrameLog[]
   cameraSupports: string[]
   hardwareApplied: string[]
   appVersion: string
