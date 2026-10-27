@@ -4,6 +4,9 @@ A React PWA that reads numbers and Latin text with the phone camera, in any size
 on-device OCR is good enough. Each scan is marked right or wrong and sent with its images and settings to a
 Google Sheet, so failures can be studied. Open it on the phone: https://israeleis.github.io/number-scanner-poc/
 
+**Findings from the phone tests, and the plan for bringing the scanner into MICMS:
+[docs/INTEGRATION.md](docs/INTEGRATION.md).**
+
 ## How it reads
 
 - **PaddleOCR in the browser:** PP-OCRv4 text detection and PP-OCRv3 English recognition (ONNX models from
