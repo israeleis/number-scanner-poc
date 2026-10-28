@@ -42,12 +42,15 @@ for (const dir of dirs.sort()) {
       console.log(`      ${l.outcome.padEnd(7)} ${l.fast ? "1-frame " : "        "}${JSON.stringify(l.read)} conf ${l.confidence ?? "-"}${fix}`)
     }
   }
-  const read = (r.frameLog ?? []).filter((x) => !x.blurry)
+  const moving = (r.frameLog ?? []).filter((x) => x.moving)
+  const read = (r.frameLog ?? []).filter((x) => !x.blurry && !x.moving)
   const blurry = (r.frameLog ?? []).filter((x) => x.blurry)
   if (read.length) {
     console.log(`    per read frame (median): pre ${med(read.map((x) => x.preMs))} ms, det ${med(read.map((x) => x.detMs))} ms, rec ${med(read.map((x) => x.recMs))} ms, boxes ${med(read.map((x) => x.boxes))}, recognitions ${med(read.map((x) => x.recs))}`)
     const gaps = read.slice(1).map((x, i) => x.t - read[i].t)
     console.log(`    time between read frames: median ${med(gaps)} ms; sharpness read ${med(read.map((x) => x.sharp))}, blurry ${med(blurry.map((x) => x.sharp))}`)
+    const still = [...read, ...blurry].filter((x) => x.diff !== undefined)
+    console.log(`    motion: ${moving.length} moving entries (one per 200 ms); picture change still median ${med(still.map((x) => x.diff))}, moving median ${med(moving.map((x) => x.diff))}; gyro still median ${med(still.map((x) => x.gyro).filter((g) => g !== undefined))}, moving median ${med(moving.map((x) => x.gyro).filter((g) => g !== undefined))}`)
   }
   const sw = r.focusSweeps ?? []
   if (sw.length) {

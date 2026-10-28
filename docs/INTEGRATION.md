@@ -202,6 +202,17 @@ With them come their unit tests (`*.test.ts`, 61 tests).
 **Load order:** start the main processor engine only when the scanner opens, not when MICMS starts.
 Then prepare WebGPU in the background, as in the POC.
 
+## Waiting for a steady phone
+
+In continuous scanning the phone moves from item to item, and a number entering the box during the move
+was already being read (cut off or blurred). Now nothing is read while the phone moves: motion comes from
+the gyroscope (rotation speed, where the browser gives it; iPhone asks permission) and from the change
+between consecutive small frames (works everywhere). Reading starts after 150 ms of steadiness, a moving
+phone ends the current label, and the aiming box turns grey and dashed while moving. The thresholds
+(25 °/s, a mean picture change of 12 out of 255) are first guesses: every frame logs rotation speed and
+picture change, so they are set from real scans. In the test browser a sliding picture measured 38–44 and
+a still one 0.
+
 ## Crosshair
 
 A switch, **צלב**, off by default, to turn on when a scan struggles. A small cross sits in the middle of the

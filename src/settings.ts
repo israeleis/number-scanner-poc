@@ -28,6 +28,11 @@ export interface Settings {
   gpu: boolean
   /** Continuous scanning: a line read with less confidence is not counted (logos, marks). */
   minLineConfidence: number
+  /** Read only once the phone has been steady for `steadyMs` (gyroscope and picture change). */
+  waitSteady: boolean
+  gyroThreshold: number
+  diffThreshold: number
+  steadyMs: number
   /** A crosshair in the middle: text nearest it is read first and listed first. */
   crosshair: boolean
   /** Mark ✓/✗ on the phone after each scan; off: everything is sent unmarked and checked later. */
@@ -63,6 +68,10 @@ export const defaults: Settings = {
   fastConfidence: 0.97,
   review: false,
   crosshair: false,
+  waitSteady: true,
+  gyroThreshold: 25,
+  diffThreshold: 12,
+  steadyMs: 150,
   minLineConfidence: 0.75,
   gpu: true,
   viewZoom: 2,
@@ -100,8 +109,8 @@ export function saveSettings(s: Settings) {
 
 /** Short name of the active combination, e.g. "P1 H0 V1 F1 T1 G0". Torch is part of it. */
 export function setupName(
-  s: Pick<Settings, 'preprocess' | 'hardware' | 'voting' | 'focusSweep' | 'gpu' | 'crosshair'>,
+  s: Pick<Settings, 'preprocess' | 'hardware' | 'voting' | 'focusSweep' | 'gpu' | 'crosshair' | 'waitSteady'>,
   torch: boolean,
 ): string {
-  return `P${+s.preprocess} H${+s.hardware} V${+s.voting} F${+s.focusSweep} T${+torch} G${+s.gpu} X${+s.crosshair}`
+  return `P${+s.preprocess} H${+s.hardware} V${+s.voting} F${+s.focusSweep} T${+torch} G${+s.gpu} X${+s.crosshair} S${+s.waitSteady}`
 }

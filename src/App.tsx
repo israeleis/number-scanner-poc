@@ -19,6 +19,7 @@ import {
 } from './camera'
 import { boxCorners, hasWebGpu, loadEngine, type Engine } from './ocr/engine'
 import { runContinuous, signal, words, type Capture } from './continuous'
+import { startMotion } from './motion'
 import { AIM_H, AIM_W, displayScale, grab, frameRegion, runScan, type ScanProgress, type ScanResult } from './scanner'
 import { loadSettings, saveSettings, setupName, type Settings } from './settings'
 import { allScans, putScan, syncPending, testConnection, type Line, type Outcome, type StoredScan } from './store'
@@ -55,6 +56,9 @@ export default function App() {
   const audioRef = useRef<AudioContext | null>(null)
   /** After a scan sent without marking: how many lines it had (shown until the next scan). */
   const [saved, setSaved] = useState<number | null>(null)
+  /** While scanning: is the phone steady enough to read? (The aiming box is grey while it moves.) */
+  const [steady, setSteady] = useState(true)
+  const setSteadyNow = useCallback((v: boolean) => setSteady((old) => (old === v ? old : v)), [])
   /** The last focus search of the running scan, shown to the tester. */
   const [focusNow, setFocusNow] = useState<FocusSweep | null>(null)
   const [scans, setScans] = useState<StoredScan[]>([])
@@ -198,6 +202,8 @@ export default function App() {
     setSaved(null)
     let scanned: ScanResult
     try {
+      // The gyroscope (iPhone asks permission, which needs this tap).
+      await startMotion()
       const search = focusSearch()
       const focuser = search ? (measure: () => number, force?: boolean) => search.find(measure, force) : null
       setFocusNow(null)
@@ -224,6 +230,7 @@ export default function App() {
           stopRef.current,
           focuser,
           setFocusNow,
+          setSteadyNow,
         )
         scanned = {
           reads: run.captures.flatMap((c) =>
@@ -252,7 +259,16 @@ export default function App() {
           merged: run.merged,
         }
       } else {
-        scanned = await runScan(videoRef.current, engine, settings, setProgress, stopRef.current, focuser, setFocusNow)
+        scanned = await runScan(
+          videoRef.current,
+          engine,
+          settings,
+          setProgress,
+          stopRef.current,
+          focuser,
+          setFocusNow,
+          setSteadyNow,
+        )
       }
       if (settings.review) {
         setResult(scanned)
@@ -321,6 +337,10 @@ export default function App() {
       cameras,
       focusSweep: sweeping,
       crosshair: settings.crosshair,
+      waitSteady: settings.waitSteady,
+      gyroThreshold: settings.gyroThreshold,
+      diffThreshold: settings.diffThreshold,
+      steadyMs: settings.steadyMs,
       focusSweeps: result.sweeps,
       frameLog: result.frameLog,
       cameraSupports: supportedList(caps),
@@ -376,7 +396,10 @@ export default function App() {
           <div className={settings.aimBox ? 'viewfinder strip' : 'viewfinder'}>
             <video ref={videoRef} playsInline muted style={{ transform: `scale(${settings.viewZoom})` }} />
             {settings.aimBox && (
-              <div className="aim" style={{ width: `${AIM_W * 100}%`, height: `${AIM_H * 100}%` }} />
+              <div
+                className={scanning && !steady ? 'aim moving' : 'aim'}
+                style={{ width: `${AIM_W * 100}%`, height: `${AIM_H * 100}%` }}
+              />
             )}
             {settings.crosshair && (
               <div className="crosshair" aria-hidden="true" />
@@ -935,6 +958,13 @@ function SettingsScreen({
         step={0.05}
         set={(n) => setSettings({ ...s, minLineConfidence: n })}
       />
+      <label className="check">
+        <input type="checkbox" checked={s.waitSteady} onChange={(e) => setSettings({ ...s, waitSteady: e.target.checked })} />
+        לקרוא רק כשהטלפון יציב (לא בזמן תנועה)
+      </label>
+      <NumberField label="תנועה: מהירות סיבוב (מעלות לשנייה) שמעליה הטלפון זז" value={s.gyroThreshold} set={(n) => setSettings({ ...s, gyroThreshold: n })} />
+      <NumberField label="תנועה: שינוי בתמונה (0-255) שמעליו הטלפון זז" value={s.diffThreshold} set={(n) => setSettings({ ...s, diffThreshold: n })} />
+      <NumberField label="תנועה: כמה זמן יציב לפני קריאה (ms)" value={s.steadyMs} step={50} set={(n) => setSettings({ ...s, steadyMs: n })} />
       <NumberField label="זמן מקסימלי לסריקה (שניות)" value={s.timeoutSec} set={(n) => setSettings({ ...s, timeoutSec: n })} />
       <NumberField label="תיקון חשיפה (כשבקרת מצלמה פועלת)" value={s.exposureComp} step={0.5} set={(n) => setSettings({ ...s, exposureComp: n })} />
 

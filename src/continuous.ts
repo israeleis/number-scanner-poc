@@ -14,6 +14,7 @@ import {
   type Focuser,
   type ScanProgress,
 } from './scanner'
+import { SteadyGate } from './motion'
 import { levenshtein } from './ocr/vote'
 import type { Settings } from './settings'
 
@@ -227,6 +228,8 @@ export async function runContinuous(
   stop: { stopped: boolean },
   focuser: Focuser | null,
   onFocus?: (f: FocusSweep) => void,
+  /** Told on every frame whether the phone is steady enough to read. */
+  onSteady?: (steady: boolean) => void,
 ): Promise<ContinuousResult> {
   const start = performance.now()
   const tracker = new LabelTracker(s.voting ? 2 : 1)
@@ -249,6 +252,7 @@ export async function runContinuous(
   }
   if (s.focusSweep) await sweep()
   let blurryInARow = 0
+  const gate = new SteadyGate(s)
   let framesRead = 0
   let framesBlurry = 0
   let sharpSum = 0
@@ -257,13 +261,22 @@ export async function runContinuous(
   while (!stop.stopped) {
     const region = frameRegion(video, s)
     const frame = grab(video, region)
+    const t = Math.round(performance.now() - start)
+    const motion = gate.check(frame, performance.now())
+    onSteady?.(motion.steady)
+    if (!motion.steady) {
+      // Moving to the next item: nothing is read, and the current label is left behind.
+      logFrame(frameLog, { t, sharp: 0, blurry: false, moving: true, gyro: motion.gyro, diff: motion.diff })
+      tracker.feed([])
+      await new Promise((r) => setTimeout(r, 30))
+      continue
+    }
     // The crosshair sits in the middle of what is read (the box and the view are centred).
     const focus = s.crosshair ? { x: frame.width / 2, y: frame.height / 2 } : undefined
     last = frame
     const sharp = sharpnessOf(frame)
-    const t = Math.round(performance.now() - start)
     if (sharp < s.blurThreshold) {
-      logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: true })
+      logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: true, gyro: motion.gyro, diff: motion.diff })
       framesBlurry++
       onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: [], region, scale: frame.width / region.w })
       // Moving to the next item blurs the picture: look for the focus again (no limit here).
@@ -288,7 +301,7 @@ export async function runContinuous(
     const cut = allReads.filter((r) => !reads.includes(r)).map((r) => r.text)
     framesRead++
     sharpSum += sharp
-    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: reads.map((r) => r.text), conf: reads.map((r) => Math.round(r.confidence * 100) / 100), cut })
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, gyro: motion.gyro, diff: motion.diff, preMs, ...engine.last, reads: reads.map((r) => r.text), conf: reads.map((r) => Math.round(r.confidence * 100) / 100), cut })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: reads, region, scale: frame.width / region.w })
     // Logos and marks (CE, FCC) come out as short low-confidence "words": not counted as lines.
     const sure = reads.filter((r) => r.confidence >= s.minLineConfidence)

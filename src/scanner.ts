@@ -3,6 +3,7 @@ import { textAxes, type Engine, type TextRead } from './ocr/engine'
 import { laplacianVariance, preprocess, toGray } from './ocr/imageops'
 import { inReadingOrder, vote, type FrameRead, type VotedRead } from './ocr/vote'
 import type { FocusSweep } from './camera'
+import { SteadyGate } from './motion'
 import type { Settings } from './settings'
 
 /** A rectangle in video pixels. */
@@ -67,6 +68,10 @@ export interface FrameLog {
   boxes?: number
   recs?: number
   reads?: string[]
+  /** Phone moving (frame not read), rotation speed (°/s, when known) and picture change (0-255). */
+  moving?: boolean
+  gyro?: number
+  diff?: number
   /** Confidence of each read, same order. */
   conf?: number[]
   /** Reads left out because they were cut by the side of the aiming box. */
@@ -84,6 +89,9 @@ export function wholeReads<T extends { box: { x: number; w: number } }>(reads: T
 
 /** Keeps the first frames of a long run (a continuous run can read thousands). */
 export function logFrame(log: FrameLog[], f: FrameLog) {
+  // While the phone moves frames come every few ms: one moving entry per 200 ms is enough.
+  const prev = log[log.length - 1]
+  if (f.moving && prev?.moving && f.t - prev.t < 200) return
   if (log.length < 400) log.push(f)
 }
 
@@ -169,6 +177,8 @@ export async function runScan(
   signal: { stopped: boolean },
   focuser: Focuser | null,
   onFocus?: (f: FocusSweep) => void,
+  /** Told on every frame whether the phone is steady enough to read. */
+  onSteady?: (steady: boolean) => void,
 ): Promise<ScanResult> {
   const start = performance.now()
   const sweeps: (FocusSweep & { at: number })[] = []
@@ -186,6 +196,7 @@ export async function runScan(
   }
   if (s.focusSweep) await sweep()
   let blurryInARow = 0
+  const gate = new SteadyGate(s)
   const reads: FrameRead[] = []
   let framesRead = 0
   let framesBlurry = 0
@@ -199,11 +210,18 @@ export async function runScan(
     const region = frameRegion(video, s)
     const scale = frameScale(region)
     const frame = grab(video, region)
+    const t = Math.round(performance.now() - start)
+    const motion = gate.check(frame, performance.now())
+    onSteady?.(motion.steady)
+    if (!motion.steady) {
+      logFrame(frameLog, { t, sharp: 0, blurry: false, moving: true, gyro: motion.gyro, diff: motion.diff })
+      await nextFrame()
+      continue
+    }
     last = frame
     const sharp = sharpnessOf(frame)
-    const t = Math.round(performance.now() - start)
     if (sharp < s.blurThreshold) {
-      logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: true })
+      logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: true, gyro: motion.gyro, diff: motion.diff })
       framesBlurry++
       // Still blurred: the phone or the text moved. Search again (a few times at most).
       if (s.focusSweep && ++blurryInARow >= 2 && sweeps.length < 5) {
@@ -228,7 +246,7 @@ export async function runScan(
     const cut = allReads.filter((r) => !frameReads.includes(r)).map((r) => r.text)
     framesRead++
     sharpSum += sharp
-    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, preMs, ...engine.last, reads: frameReads.map((r) => r.text), conf: frameReads.map((r) => Math.round(r.confidence * 100) / 100), cut })
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, gyro: motion.gyro, diff: motion.diff, preMs, ...engine.last, reads: frameReads.map((r) => r.text), conf: frameReads.map((r) => Math.round(r.confidence * 100) / 100), cut })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: frameReads, region, scale })
     if (frameReads.length) {
       framesWithText++

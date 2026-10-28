@@ -84,6 +84,11 @@ export interface ScanRecord {
   focusSweep: boolean
   /** The crosshair was on: lines read and listed nearest it first. */
   crosshair: boolean
+  /** Reading waited for a steady phone, with these thresholds. */
+  waitSteady: boolean
+  gyroThreshold: number
+  diffThreshold: number
+  steadyMs: number
   /** Each focus search: when it started, chosen distance (metres), sharpness, time, and every step. */
   focusSweeps: {
     at: number
