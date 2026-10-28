@@ -274,8 +274,8 @@ export async function runContinuous(
       await new Promise((r) => setTimeout(r, 30))
       continue
     }
-    // Results come from the middle of what is read outwards; while precision is held (button or a
-    // finger on the picture), only the line at its point is read.
+    // Results come from the middle outwards, or from a finger held on the picture; while the precision
+    // button is held, only the line under the crosshair is read.
     const at = focusPoint(video, s, region, frame, precision)
     const focus = at.focus
     last = frame
@@ -307,7 +307,7 @@ export async function runContinuous(
     const cut = allReads.filter((r) => !reads.includes(r)).map((r) => r.text)
     framesRead++
     sharpSum += sharp
-    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, gyro: motion.gyro, diff: motion.diff, aim: at.only ? [Math.round(focus.x), Math.round(focus.y)] : undefined, preMs, ...engine.last, reads: reads.map((r) => r.text), conf: reads.map((r) => Math.round(r.confidence * 100) / 100), cut })
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, gyro: motion.gyro, diff: motion.diff, aim: precision?.point ? [Math.round(focus.x), Math.round(focus.y)] : undefined, only: at.only || undefined, preMs, ...engine.last, reads: reads.map((r) => r.text), conf: reads.map((r) => Math.round(r.confidence * 100) / 100), cut })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: reads, region, scale: frame.width / region.w })
     // Logos and marks (CE, FCC) come out as short low-confidence "words": not counted as lines.
     const sure = reads.filter((r) => r.confidence >= s.minLineConfidence)

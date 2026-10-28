@@ -57,12 +57,15 @@ export interface ScanProgress {
 }
 
 /**
- * Precision, while the tester holds it: a point given as shares (0-1) of the viewfinder's width and
- * height (the middle for the precision button, or under a finger on the picture). Null: off. The scan
- * loops read it on every frame, so it can change during a scan.
+ * A point the tester holds, given as shares (0-1) of the viewfinder's width and height. Null: none,
+ * results are sorted from the middle. The scan loops read it on every frame, so it can change during
+ * a scan.
+ * - The precision button: the middle, `only`: just the line under it is read.
+ * - A finger on the picture: a point just above the fingertip; everything is read, sorted nearest it.
  */
 export interface Precision {
   point: { fx: number; fy: number } | null
+  only: boolean
 }
 
 /** A point on the viewfinder (shares of its size) in pixels of the frame cut from `region`. */
@@ -91,7 +94,7 @@ export function focusPoint(
 ) {
   const p = precision?.point
   if (!p || !video.clientWidth) return { focus: { x: frame.width / 2, y: frame.height / 2 }, only: false }
-  return { focus: viewToFrame(video, s.viewZoom, region, frame.width / region.w, p), only: true }
+  return { focus: viewToFrame(video, s.viewZoom, region, frame.width / region.w, p), only: precision!.only }
 }
 
 /** What happened to one camera frame, for studying speed and failures. */
@@ -110,8 +113,9 @@ export interface FrameLog {
   moving?: boolean
   gyro?: number
   diff?: number
-  /** Precision was held: the point (frame pixels) only the nearest line to was read. */
+  /** A held point (frame pixels): results were sorted from it (finger), or only the line at it was read (precision button, see `only`). */
   aim?: [number, number]
+  only?: boolean
   /** Confidence of each read, same order. */
   conf?: number[]
   /** Reads left out because they were cut by the side of the aiming box. */
@@ -291,7 +295,7 @@ export async function runScan(
     const cut = allReads.filter((r) => !frameReads.includes(r)).map((r) => r.text)
     framesRead++
     sharpSum += sharp
-    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, gyro: motion.gyro, diff: motion.diff, aim: at.only ? [Math.round(at.focus.x), Math.round(at.focus.y)] : undefined, preMs, ...engine.last, reads: frameReads.map((r) => r.text), conf: frameReads.map((r) => Math.round(r.confidence * 100) / 100), cut })
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, gyro: motion.gyro, diff: motion.diff, aim: precision?.point ? [Math.round(at.focus.x), Math.round(at.focus.y)] : undefined, only: at.only || undefined, preMs, ...engine.last, reads: frameReads.map((r) => r.text), conf: frameReads.map((r) => Math.round(r.confidence * 100) / 100), cut })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: frameReads, region, scale })
     if (frameReads.length) {
       framesWithText++

@@ -67,17 +67,20 @@ export default function App() {
   /** After a scan sent without marking: how many lines it had (shown until the next scan). */
   const [saved, setSaved] = useState<number | null>(null)
   /** Precision while held (button or finger on the picture): the point, shared with the scan loops. */
-  const precisionRef = useRef<Precision>({ point: null })
-  const [aim, setAim] = useState<{ fx: number; fy: number } | null>(null)
-  const holdPrecision = (p: { fx: number; fy: number } | null) => {
+  const precisionRef = useRef<Precision>({ point: null, only: false })
+  const [aim, setAim] = useState<{ fx: number; fy: number; only: boolean } | null>(null)
+  const holdPrecision = (p: { fx: number; fy: number } | null, only = false) => {
     precisionRef.current.point = p
-    setAim(p)
+    precisionRef.current.only = only
+    setAim(p && { ...p, only })
   }
+  /** The point a finger shows: about 1 cm (40 CSS pixels) above the fingertip, so it does not hide it. */
   const pointIn = (e: React.PointerEvent<HTMLElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
+    const lift = e.pointerType === 'mouse' ? 0 : 40
     return {
       fx: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      fy: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+      fy: Math.min(1, Math.max(0, (e.clientY - lift - r.top) / r.height)),
     }
   }
   /** While scanning: is the phone steady enough to read? (The aiming box is grey while it moves.) */
@@ -420,7 +423,7 @@ export default function App() {
           </div>
           <div
             className={settings.aimBox ? 'viewfinder strip' : 'viewfinder'}
-            // A finger held on the picture is the precision point: only the line nearest it is read.
+            // A finger held on the picture: results are sorted from just above it instead of the middle.
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId)
               holdPrecision(pointIn(e))
@@ -437,7 +440,11 @@ export default function App() {
               />
             )}
             {aim && (
-              <div className="crosshair" aria-hidden="true" style={{ left: `${aim.fx * 100}%`, top: `${aim.fy * 100}%` }} />
+              <div
+                className={aim.only ? 'crosshair' : 'crosshair finger'}
+                aria-hidden="true"
+                style={{ left: `${aim.fx * 100}%`, top: `${aim.fy * 100}%` }}
+              />
             )}
             {scanning && progress && <LiveBoxes video={videoRef.current} progress={progress} zoom={settings.viewZoom} />}
             {scanning && settings.mode === 'continuous' && live.length > 0 && (
@@ -472,17 +479,17 @@ export default function App() {
           )}
 
           <button
-            className={aim ? 'precision on' : 'precision'}
+            className={aim?.only ? 'precision on' : 'precision'}
             // Precision while held: the crosshair in the middle, only the line under it is read.
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId)
-              holdPrecision({ fx: 0.5, fy: 0.5 })
+              holdPrecision({ fx: 0.5, fy: 0.5 }, true)
             }}
             onPointerUp={() => holdPrecision(null)}
             onPointerCancel={() => holdPrecision(null)}
             onContextMenu={(e) => e.preventDefault()}
           >
-            {aim ? 'דיוק: רק מה שמתחת לצלב' : 'החזק לדיוק'}
+            {aim?.only ? 'דיוק: רק מה שמתחת לצלב' : 'החזק לדיוק'}
           </button>
 
           <div className="toggles">
