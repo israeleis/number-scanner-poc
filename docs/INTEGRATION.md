@@ -202,6 +202,15 @@ With them come their unit tests (`*.test.ts`, 61 tests).
 **Load order:** start the main processor engine only when the scanner opens, not when MICMS starts.
 Then prepare WebGPU in the background, as in the POC.
 
+## Crosshair
+
+A switch, **צלב**, off by default, to turn on when a scan struggles. A small cross sits in the middle of the
+aiming box. Everything is still read, but boxes are read nearest the cross first, and the lines are listed
+nearest first, so the number aimed at comes first, in single and continuous scans. Each line saves its
+distance from the cross (0 when the cross is on it), so the lab data shows which number the tester
+wanted. In MICMS this is the natural input for matching: try the line under the cross first, then its
+neighbours.
+
 ## What MICMS adds
 
 This is what the POC skipped on purpose, because it read all the text without knowing any serial:
