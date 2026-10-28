@@ -163,7 +163,9 @@ export class LabelTracker {
       cur !== null &&
       !steady.some((k) => isIdentity(k) && inLabel(k)) &&
       steady.some((k) => isIdentity(k) && !inLabel(k) && cur.some((c) => isIdentity(c) && sameShape(c, k)))
-    if (!cur || known < steady.length / 2 || newIdentity) {
+    // All of the label's lines still in view with more beside them: the same label, more of it seen.
+    const grown = cur !== null && cur.every((c) => steady.some((k) => sameLine(c, k)))
+    if (!cur || (known < steady.length / 2 && !grown) || newIdentity) {
       this.current = steady
       // Lines seen before the switch must be seen again to count for the new label.
       this.recent = [new Set(keys)]
