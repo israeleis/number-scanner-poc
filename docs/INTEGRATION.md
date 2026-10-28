@@ -199,6 +199,13 @@ With them come their unit tests (`*.test.ts`, 61 tests).
   threads speed up the main processor. Check that nothing else in MICMS breaks under them.
 - The camera needs HTTPS (production already has it).
 
+**Where the scanner is offered:** only on phones and tablets: a touch screen and a back camera
+(`matchMedia('(pointer: coarse)')` and a camera facing the environment). Nobody scans by lifting a
+computer, so on a computer the scan button is not shown, and the models are never downloaded there.
+
+**The cross is optional:** a scan works without touching anything (results come centre-out). A touch only
+tells the scanner which area to order from; the precision button is for when that is not enough.
+
 **Load order:** start the main processor engine only when the scanner opens, not when MICMS starts.
 Then prepare WebGPU in the background, as in the POC.
 
