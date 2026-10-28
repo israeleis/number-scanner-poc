@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aimRegion, wholeReads } from './scanner'
+import { aimRegion, viewToFrame, wholeReads } from './scanner'
 
 describe('aimRegion', () => {
   it('a portrait video in a portrait box that fits exactly: the middle share of the whole picture', () => {
@@ -45,5 +45,24 @@ describe('wholeReads', () => {
   })
   it('keeps everything with the box off', () => {
     expect(wholeReads([r('T7902', 0, 80)], 600, false)).toHaveLength(1)
+  })
+})
+
+describe('viewToFrame', () => {
+  const video = { videoWidth: 2160, videoHeight: 3840, clientWidth: 390, clientHeight: 300 }
+
+  it('the middle of the viewfinder is the middle of the box', () => {
+    const r = aimRegion(2160, 3840, 390, 300, 0.9, 0.85, 2)
+    const scale = 1280 / r.w
+    const p = viewToFrame(video, 2, r, scale, { fx: 0.5, fy: 0.5 })
+    expect(p.x).toBeCloseTo((r.w * scale) / 2)
+    expect(p.y).toBeCloseTo((r.h * scale) / 2)
+  })
+
+  it('a finger near the left edge lands near the left of the box', () => {
+    const r = aimRegion(2160, 3840, 390, 300, 0.9, 0.85, 1)
+    const p = viewToFrame(video, 1, r, 1, { fx: 0.1, fy: 0.5 })
+    // 10% across the view is 5% of the view inside the box, whose left edge is at 5%.
+    expect(p.x).toBeCloseTo((0.05 / 0.9) * r.w, 0)
   })
 })

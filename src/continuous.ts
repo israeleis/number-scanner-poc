@@ -3,6 +3,7 @@
 import type { FocusSweep } from './camera'
 import type { Engine, TextRead } from './ocr/engine'
 import {
+  focusPoint,
   focusSharpness,
   frameRegion,
   grab,
@@ -10,6 +11,7 @@ import {
   processedCopy,
   sharpnessOf,
   type FrameLog,
+  type Precision,
   wholeReads,
   type Focuser,
   type ScanProgress,
@@ -25,7 +27,7 @@ export interface Capture {
   fast: boolean[]
   /** Per line: the best confidence it was read with. */
   conf: number[]
-  /** Per line, with the crosshair: pixels from it (null: not in the last frame, or no crosshair). */
+  /** Per line: pixels from the middle, or from the precision point when held (null: not in the last frame). */
   dist: (number | null)[]
   /** Average confidence of the lines' reads. */
   confidence: number
@@ -230,6 +232,7 @@ export async function runContinuous(
   onFocus?: (f: FocusSweep) => void,
   /** Told on every frame whether the phone is steady enough to read. */
   onSteady?: (steady: boolean) => void,
+  precision?: Precision,
 ): Promise<ContinuousResult> {
   const start = performance.now()
   const tracker = new LabelTracker(s.voting ? 2 : 1)
@@ -271,9 +274,10 @@ export async function runContinuous(
       await new Promise((r) => setTimeout(r, 30))
       continue
     }
-    // The middle of what is read (the box and the view are centred): results come from it outwards,
-    // and with precision on (the crosshair) only what is under it is read.
-    const focus = { x: frame.width / 2, y: frame.height / 2 }
+    // Results come from the middle of what is read outwards; while precision is held (button or a
+    // finger on the picture), only the line at its point is read.
+    const at = focusPoint(video, s, region, frame, precision)
+    const focus = at.focus
     last = frame
     const sharp = sharpnessOf(frame)
     if (sharp < s.blurThreshold) {
@@ -297,13 +301,13 @@ export async function runContinuous(
       minConfidence: s.minConfidence,
       maxBoxes: 12,
       focus,
-      onlyAtFocus: s.crosshair,
+      onlyAtFocus: at.only,
     })
     const reads = wholeReads(allReads, frame.width, s.aimBox)
     const cut = allReads.filter((r) => !reads.includes(r)).map((r) => r.text)
     framesRead++
     sharpSum += sharp
-    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, gyro: motion.gyro, diff: motion.diff, preMs, ...engine.last, reads: reads.map((r) => r.text), conf: reads.map((r) => Math.round(r.confidence * 100) / 100), cut })
+    logFrame(frameLog, { t, sharp: Math.round(sharp), blurry: false, gyro: motion.gyro, diff: motion.diff, aim: at.only ? [Math.round(focus.x), Math.round(focus.y)] : undefined, preMs, ...engine.last, reads: reads.map((r) => r.text), conf: reads.map((r) => Math.round(r.confidence * 100) / 100), cut })
     onProgress({ sharpness: sharp, framesRead, framesBlurry, lastReads: reads, region, scale: frame.width / region.w })
     // Logos and marks (CE, FCC) come out as short low-confidence "words": not counted as lines.
     const sure = reads.filter((r) => r.confidence >= s.minLineConfidence)

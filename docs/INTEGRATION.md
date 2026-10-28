@@ -222,9 +222,15 @@ distance from the middle (0 when the middle is on it), so the lab data shows whi
 (The label's own reading order, along its slant, is still in the code, `inTextOrder`, for showing a
 whole label.)
 
-**Precision button (דיוק, off by default):** for a label with a lot of text where the default did not get
-the number. It shows a crosshair in the middle, and only the line under the crosshair, or within one
-line's height of it, is read. Nothing else is read, so it is also quicker (one line instead of 5–12).
+**Precision, while held.** For a label with a lot of text where the default did not get the number:
+- **Hold the precision button:** a crosshair shows in the middle, and only the line under it (or within
+  one line's height) is read. Let go and everything is read again.
+- **Hold a finger on the picture:** the point under the finger is the precision point, wherever it is in
+  the box; the crosshair follows the finger, and only the line nearest it is read.
+
+It works during a running scan (natural in continuous scanning). Nothing else is read, so it is also
+quicker (one line instead of 5–12). Frames read with precision log the point (`aim`). Where the
+button finally sits is for MICMS's screen design.
 
 ## What MICMS adds
 

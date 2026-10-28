@@ -116,7 +116,7 @@ select { width: 100%; padding: 10px; margin-top: 4px; border-radius: 8px; border
 .label-head { margin: 14px 0 4px; padding-top: 8px; border-top: 2px solid #333; }
 .saved { color: #00e676; text-align: center; font-weight: 600; margin: 6px 0; }
 /* A small cross in the middle of the viewfinder: put it on the number wanted. */
-.crosshair { position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; transform: translate(-50%, -50%); pointer-events: none; }
+.crosshair { position: absolute; width: 34px; height: 34px; transform: translate(-50%, -50%); pointer-events: none; }
 .crosshair::before, .crosshair::after { content: ''; position: absolute; background: #ff1744; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
 .crosshair::before { left: 50%; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); }
 .crosshair::after { top: 50%; left: 0; right: 0; height: 2px; transform: translateY(-50%); }
@@ -124,3 +124,6 @@ select { width: 100%; padding: 10px; margin-top: 4px; border-radius: 8px; border
 .last-capture.aimed .words:first-child .word { border-color: #ff1744; background: rgba(255, 23, 68, 0.25); }
 /* The phone is moving: nothing is read until it is steady. */
 .aim.moving { border-color: rgba(160, 160, 160, 0.6); border-style: dashed; }
+.viewfinder { touch-action: none; user-select: none; -webkit-user-select: none; }
+.precision { width: 100%; padding: 10px; font-weight: 700; user-select: none; -webkit-user-select: none; touch-action: none; }
+.precision.on { background: #b71c1c; border-color: #ff1744; }

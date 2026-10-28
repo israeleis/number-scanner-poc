@@ -20,7 +20,17 @@ import {
 import { boxCorners, hasWebGpu, loadEngine, type Engine } from './ocr/engine'
 import { runContinuous, signal, words, type Capture } from './continuous'
 import { startMotion } from './motion'
-import { AIM_H, AIM_W, displayScale, grab, frameRegion, runScan, type ScanProgress, type ScanResult } from './scanner'
+import {
+  AIM_H,
+  AIM_W,
+  displayScale,
+  grab,
+  frameRegion,
+  runScan,
+  type Precision,
+  type ScanProgress,
+  type ScanResult,
+} from './scanner'
 import { loadSettings, saveSettings, setupName, type Settings } from './settings'
 import { allScans, putScan, syncPending, testConnection, type Line, type Outcome, type StoredScan } from './store'
 
@@ -56,6 +66,20 @@ export default function App() {
   const audioRef = useRef<AudioContext | null>(null)
   /** After a scan sent without marking: how many lines it had (shown until the next scan). */
   const [saved, setSaved] = useState<number | null>(null)
+  /** Precision while held (button or finger on the picture): the point, shared with the scan loops. */
+  const precisionRef = useRef<Precision>({ point: null })
+  const [aim, setAim] = useState<{ fx: number; fy: number } | null>(null)
+  const holdPrecision = (p: { fx: number; fy: number } | null) => {
+    precisionRef.current.point = p
+    setAim(p)
+  }
+  const pointIn = (e: React.PointerEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    return {
+      fx: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+      fy: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+    }
+  }
   /** While scanning: is the phone steady enough to read? (The aiming box is grey while it moves.) */
   const [steady, setSteady] = useState(true)
   const setSteadyNow = useCallback((v: boolean) => setSteady((old) => (old === v ? old : v)), [])
@@ -231,6 +255,7 @@ export default function App() {
           focuser,
           setFocusNow,
           setSteadyNow,
+          precisionRef.current,
         )
         scanned = {
           reads: run.captures.flatMap((c) =>
@@ -268,6 +293,7 @@ export default function App() {
           focuser,
           setFocusNow,
           setSteadyNow,
+          precisionRef.current,
         )
       }
       if (settings.review) {
@@ -336,7 +362,6 @@ export default function App() {
       cameraChoice: settings.cameraId ? ('manual' as const) : ('automatic' as const),
       cameras,
       focusSweep: sweeping,
-      crosshair: settings.crosshair,
       waitSteady: settings.waitSteady,
       gyroThreshold: settings.gyroThreshold,
       diffThreshold: settings.diffThreshold,
@@ -393,7 +418,17 @@ export default function App() {
               </button>
             ))}
           </div>
-          <div className={settings.aimBox ? 'viewfinder strip' : 'viewfinder'}>
+          <div
+            className={settings.aimBox ? 'viewfinder strip' : 'viewfinder'}
+            // A finger held on the picture is the precision point: only the line nearest it is read.
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId)
+              holdPrecision(pointIn(e))
+            }}
+            onPointerMove={(e) => aim && holdPrecision(pointIn(e))}
+            onPointerUp={() => holdPrecision(null)}
+            onPointerCancel={() => holdPrecision(null)}
+          >
             <video ref={videoRef} playsInline muted style={{ transform: `scale(${settings.viewZoom})` }} />
             {settings.aimBox && (
               <div
@@ -401,8 +436,8 @@ export default function App() {
                 style={{ width: `${AIM_W * 100}%`, height: `${AIM_H * 100}%` }}
               />
             )}
-            {settings.crosshair && (
-              <div className="crosshair" aria-hidden="true" />
+            {aim && (
+              <div className="crosshair" aria-hidden="true" style={{ left: `${aim.fx * 100}%`, top: `${aim.fy * 100}%` }} />
             )}
             {scanning && progress && <LiveBoxes video={videoRef.current} progress={progress} zoom={settings.viewZoom} />}
             {scanning && settings.mode === 'continuous' && live.length > 0 && (
@@ -436,10 +471,23 @@ export default function App() {
             </p>
           )}
 
+          <button
+            className={aim ? 'precision on' : 'precision'}
+            // Precision while held: the crosshair in the middle, only the line under it is read.
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId)
+              holdPrecision({ fx: 0.5, fy: 0.5 })
+            }}
+            onPointerUp={() => holdPrecision(null)}
+            onPointerCancel={() => holdPrecision(null)}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {aim ? 'דיוק: רק מה שמתחת לצלב' : 'החזק לדיוק'}
+          </button>
+
           <div className="toggles">
             <Toggle label="עיבוד תמונה" on={settings.preprocess} set={(v) => setSettings({ ...settings, preprocess: v })} />
             <Toggle label="בקרת מצלמה" on={settings.hardware} set={(v) => setSettings({ ...settings, hardware: v })} />
-            <Toggle label="דיוק" on={settings.crosshair} set={(v) => setSettings({ ...settings, crosshair: v })} />
             <Toggle label="הצבעה" on={settings.voting} set={(v) => setSettings({ ...settings, voting: v })} />
             <Toggle label="מעבד גרפי" on={settings.gpu} set={(v) => setSettings({ ...settings, gpu: v })} />
             {canSweepFocus(caps) && (
