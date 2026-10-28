@@ -21,6 +21,21 @@ export interface CameraChoice {
   minFocus: number | null
 }
 
+/**
+ * Can this device scan at all: a touch screen and a camera? Checked before anything is downloaded
+ * (no camera permission needed: cameras are listed, without names, before permission).
+ */
+export async function canScan(): Promise<{ touch: boolean; camera: boolean }> {
+  const touch = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches
+  let camera = false
+  try {
+    camera = (await navigator.mediaDevices?.enumerateDevices())?.some((d) => d.kind === 'videoinput') ?? false
+  } catch {
+    camera = false
+  }
+  return { touch, camera }
+}
+
 const stopAll = (s: MediaStream) => s.getTracks().forEach((t) => t.stop())
 
 /**

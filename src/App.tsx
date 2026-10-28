@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  canScan,
   cachedProbe,
   capabilities,
   closestFocusing,
@@ -124,8 +125,15 @@ export default function App() {
   // The app starts on the main processor, which loads quickly. With the switch on, and only if the
   // browser offers WebGPU, the graphics processor's runtime is then downloaded and prepared in the
   // background; the next scan after it is ready uses it. A scan already running keeps its engine.
+  // Only a device with a touch screen and a camera scans; anywhere else nothing is downloaded.
+  const [device, setDevice] = useState<{ touch: boolean; camera: boolean } | null>(null)
+  useEffect(() => {
+    canScan().then(setDevice)
+  }, [])
+  const scannable = !!device?.touch && !!device.camera
   const [gpuState, setGpuState] = useState<'off' | 'checking' | 'unsupported' | 'preparing' | 'ready' | 'failed'>('off')
   useEffect(() => {
+    if (!scannable) return
     let cancelled = false
     setEngineError('')
     loadEngine(false).then(
@@ -151,7 +159,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [settings.gpu])
+  }, [settings.gpu, scannable])
 
   // Retry sending every 30 seconds and when the network comes back.
   useEffect(() => {
@@ -166,7 +174,7 @@ export default function App() {
 
   // The camera stays open while the app is open; the video element lives on the scan screen only.
   useEffect(() => {
-    if (screen !== 'scan' || !videoRef.current) return
+    if (screen !== 'scan' || !videoRef.current || !scannable) return
     let cancelled = false
     let opened: MediaStreamTrack | null = null
     const video = videoRef.current
@@ -201,7 +209,7 @@ export default function App() {
       setTrack(null)
       setTorchState(false)
     }
-  }, [screen, settings.cameraId, settings.cameraHeight, probeRun, cameraRetry])
+  }, [screen, settings.cameraId, settings.cameraHeight, probeRun, cameraRetry, scannable])
 
   useEffect(() => {
     if (track) setHardware(track, settings.hardware, settings.exposureComp).then(setHwApplied)
@@ -417,6 +425,12 @@ export default function App() {
 
       {screen === 'scan' && (
         <main className="scan">
+          {device && !scannable && (
+            <p className="error">
+              סריקה זמינה רק בטלפון או בטאבלט עם מסך מגע ומצלמה.{' '}
+              {!device.touch && 'אין כאן מסך מגע.'} {!device.camera && 'אין כאן מצלמה.'} לא הורד שום מודל.
+            </p>
+          )}
           <div className="tabs" role="tablist">
             {(['single', 'continuous'] as const).map((m) => (
               <button

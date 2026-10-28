@@ -200,8 +200,11 @@ With them come their unit tests (`*.test.ts`, 61 tests).
 - The camera needs HTTPS (production already has it).
 
 **Where the scanner is offered:** only on phones and tablets: a touch screen and a back camera
-(`matchMedia('(pointer: coarse)')` and a camera facing the environment). Nobody scans by lifting a
-computer, so on a computer the scan button is not shown, and the models are never downloaded there.
+(`navigator.maxTouchPoints` / `matchMedia('(pointer: coarse)')`, and a camera in
+`enumerateDevices()`, which lists cameras without asking permission). Nobody scans by lifting a computer.
+On any device without a touch screen or a camera the scan button is not shown and **nothing is
+downloaded**: no models, no runtime. The POC already does this (`canScan` in `src/camera.ts`): a desktop
+without touch and camera downloaded none of the files, a phone with a camera downloaded them.
 
 **The cross is optional:** a scan works without touching anything (results come centre-out). A touch only
 tells the scanner which area to order from; the precision button is for when that is not enough.
