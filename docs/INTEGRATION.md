@@ -257,6 +257,14 @@ This is what the POC skipped on purpose, because it read all the text without kn
   alone may be only part of it. The scanner always returns whole lines (and the words of each line);
   matching must try each line with its spaces and hyphens removed, then pairs and runs of neighbouring
   words, then single words.
+  **A small gap and a large gap are different things.** Inside a line, a word space or a hyphen joins
+  parts of one value. A large gap on the same row (two fields side by side, like `SANDWICH` and
+  `BURGER`, or two columns of a label) means separate values. The scanner already keeps those apart:
+  text that is far apart comes out as separate lines, and only pieces that touch are joined into one
+  line (`X1404ZA-` + `-NK101`). Each line keeps its box (position, slant, height), so matching may join
+  a line with its neighbour on the same row only when the gap between them is small, about one
+  character's height or less, and never across a large gap. Known slip: two fields that touch can still
+  come out as one line (`ASUS Vivobook 14T:X1404Z`).
   Results are ranked, never a silent guess.
 - **Use matching to decide when to stop:** a label is done as soon as one of its lines matches an item
   strongly, even from one frame. A line that matches nothing waits for a second frame. This removes most
