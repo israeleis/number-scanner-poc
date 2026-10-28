@@ -40,6 +40,8 @@ export interface TextRead {
   box: Box
   /** Degrees the text was turned to read it (its slant, plus 180 when it was upside down). */
   rotation: number
+  /** With a crosshair: pixels from the crosshair to the line's box (0 when the crosshair is on it). */
+  dist?: number
 }
 
 export interface OcrOptions {
@@ -49,6 +51,20 @@ export interface OcrOptions {
   minConfidence: number
   /** At most this many text boxes are read per frame. */
   maxBoxes: number
+  /**
+   * A crosshair point (pixels of the image): boxes are read nearest it first, and the reads come back
+   * nearest first. Without it: largest boxes first, reads in reading order.
+   */
+  focus?: { x: number; y: number }
+}
+
+/** Pixels from a point to a (turned) box; 0 when the point is inside it. */
+export function distanceToBox(p: { x: number; y: number }, b: Pick<Box, 'cx' | 'cy' | 'length' | 'thickness' | 'angle'>): number {
+  const dx = p.x - b.cx
+  const dy = p.y - b.cy
+  const along = Math.abs(dx * Math.cos(b.angle) + dy * Math.sin(b.angle)) - b.length / 2
+  const across = Math.abs(-dx * Math.sin(b.angle) + dy * Math.cos(b.angle)) - b.thickness / 2
+  return Math.hypot(Math.max(0, along), Math.max(0, across))
 }
 
 const loading = new Map<boolean, Promise<Engine>>()
@@ -153,8 +169,9 @@ export class Engine {
 
   async read(canvas: HTMLCanvasElement, options: OcrOptions): Promise<TextRead[]> {
     const t0 = performance.now()
+    const focus = options.focus
     const boxes = (await this.detect(canvas, options.detLimit))
-      .sort((a, b) => b.w * b.h - a.w * a.h)
+      .sort((a, b) => (focus ? distanceToBox(focus, a) - distanceToBox(focus, b) : b.w * b.h - a.w * a.h))
       .slice(0, options.maxBoxes)
     const t1 = performance.now()
     let recs = 0
@@ -175,11 +192,12 @@ export class Engine {
       }
       const rotation = Math.round((box.angle * 180) / Math.PI + (best.flipped ? 180 : 0))
       if (best.text && best.confidence >= options.minConfidence) {
-        reads.push({ text: cleanDigits(best.text), confidence: best.confidence, box, rotation })
+        const dist = focus ? Math.round(distanceToBox(focus, box)) : undefined
+        reads.push({ text: cleanDigits(best.text), confidence: best.confidence, box, rotation, dist })
       }
     }
     this.last = { detMs: Math.round(t1 - t0), recMs: Math.round(performance.now() - t1), boxes: boxes.length, recs }
-    return inTextOrder(reads)
+    return focus ? reads.sort((a, b) => a.dist! - b.dist!) : inTextOrder(reads)
   }
 
   private async detect(canvas: HTMLCanvasElement, limit: number): Promise<Box[]> {

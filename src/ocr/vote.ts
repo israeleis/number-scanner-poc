@@ -13,6 +13,8 @@ export interface FrameRead {
   y?: number
   /** Height of the text as a share of the frame height. */
   h?: number
+  /** With a crosshair: pixels from it. */
+  d?: number
 }
 
 export interface VotedRead {
@@ -25,6 +27,8 @@ export interface VotedRead {
   x: number
   y: number
   h: number
+  /** With a crosshair: the nearest any frame read this text from it. */
+  d?: number
 }
 
 export function levenshtein(a: string, b: string): number {
@@ -128,6 +132,7 @@ function voteGroup(group: FrameRead[]): VotedRead {
     x: avg((r) => r.x ?? 0),
     y: avg((r) => r.y ?? 0),
     h: avg((r) => r.h ?? 0),
+    d: group.some((r) => r.d !== undefined) ? Math.min(...group.map((r) => r.d ?? Infinity)) : undefined,
   }
 }
 

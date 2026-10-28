@@ -227,7 +227,16 @@ export default function App() {
         )
         scanned = {
           reads: run.captures.flatMap((c) =>
-            c.lines.map((text, i) => ({ text, confidence: c.conf[i] ?? c.confidence, frames: 0, agreement: 1, x: 0, y: 0, h: 0 })),
+            c.lines.map((text, i) => ({
+              text,
+              confidence: c.conf[i] ?? c.confidence,
+              frames: 0,
+              agreement: 1,
+              x: 0,
+              y: 0,
+              h: 0,
+              d: c.dist[i] ?? undefined,
+            })),
           ),
           original: run.last ?? grab(video, frameRegion(video, settings)),
           processed: null,
@@ -311,6 +320,7 @@ export default function App() {
       cameraChoice: settings.cameraId ? ('manual' as const) : ('automatic' as const),
       cameras,
       focusSweep: sweeping,
+      crosshair: settings.crosshair,
       focusSweeps: result.sweeps,
       frameLog: result.frameLog,
       cameraSupports: supportedList(caps),
@@ -368,9 +378,12 @@ export default function App() {
             {settings.aimBox && (
               <div className="aim" style={{ width: `${AIM_W * 100}%`, height: `${AIM_H * 100}%` }} />
             )}
+            {settings.crosshair && (
+              <div className="crosshair" aria-hidden="true" />
+            )}
             {scanning && progress && <LiveBoxes video={videoRef.current} progress={progress} zoom={settings.viewZoom} />}
             {scanning && settings.mode === 'continuous' && live.length > 0 && (
-              <div className="last-capture" key={live.length}>
+              <div className={settings.crosshair ? 'last-capture aimed' : 'last-capture'} key={live.length}>
                 <span className="count">{live.length}</span>
                 <Lines lines={live[0].lines} />
               </div>
@@ -403,6 +416,7 @@ export default function App() {
           <div className="toggles">
             <Toggle label="עיבוד תמונה" on={settings.preprocess} set={(v) => setSettings({ ...settings, preprocess: v })} />
             <Toggle label="בקרת מצלמה" on={settings.hardware} set={(v) => setSettings({ ...settings, hardware: v })} />
+            <Toggle label="צלב" on={settings.crosshair} set={(v) => setSettings({ ...settings, crosshair: v })} />
             <Toggle label="הצבעה" on={settings.voting} set={(v) => setSettings({ ...settings, voting: v })} />
             <Toggle label="מעבד גרפי" on={settings.gpu} set={(v) => setSettings({ ...settings, gpu: v })} />
             {canSweepFocus(caps) && (
@@ -510,6 +524,7 @@ function uncheckedFields(r: ScanResult): ReportFields {
     agreement: r.captures ? null : round(read.agreement),
     words: words(read.text),
     fast: r.captures?.[i].fast ?? null,
+    dist: read.d ?? null,
     item: r.captures ? r.captures[i].item + 1 : null,
     atMs: r.captures?.[i].atMs ?? null,
     crop: r.captures?.[i].item ?? null,
@@ -599,6 +614,8 @@ interface DraftLine {
   atMs: number | null
   item: number | null
   fast: boolean | null
+  /** With the crosshair: pixels from it. */
+  dist: number | null
   thumb: string | null
 }
 
@@ -618,6 +635,7 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       atMs: result.captures?.[i].atMs ?? null,
       item: result.captures?.[i].item ?? null,
       fast: result.captures?.[i].fast ?? null,
+      dist: r.d ?? null,
       // The label's picture is shown once, above its first line.
       thumb:
         result.captures && (i === 0 || result.captures[i - 1].item !== result.captures[i].item)
@@ -662,6 +680,7 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       agreement: null,
       atMs: null,
       fast: null,
+      dist: null,
       // A missed line belongs to the label of the line above it.
       item: at >= 0 ? lines[at].item : (lines[0]?.item ?? null),
       thumb: null,
@@ -686,6 +705,7 @@ function Report({ result, onSave, onCancel }: { result: ScanResult; onSave: (f: 
       agreement: l.agreement,
       words: words(l.missed ? l.actual.trim() : l.read),
       fast: l.fast,
+      dist: l.dist,
       item: l.item === null ? null : l.item + 1,
       atMs: l.atMs,
       crop: l.item,

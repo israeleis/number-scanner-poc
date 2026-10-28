@@ -28,6 +28,8 @@ export interface Settings {
   gpu: boolean
   /** Continuous scanning: a line read with less confidence is not counted (logos, marks). */
   minLineConfidence: number
+  /** A crosshair in the middle: text nearest it is read first and listed first. */
+  crosshair: boolean
   /** Mark ✓/✗ on the phone after each scan; off: everything is sent unmarked and checked later. */
   review: boolean
   /** Continuous scanning: a line read with at least this confidence counts at once (no second frame). */
@@ -60,6 +62,7 @@ export const defaults: Settings = {
   focusSettleFrames: 1,
   fastConfidence: 0.97,
   review: false,
+  crosshair: false,
   minLineConfidence: 0.75,
   gpu: true,
   viewZoom: 2,
@@ -96,6 +99,9 @@ export function saveSettings(s: Settings) {
 }
 
 /** Short name of the active combination, e.g. "P1 H0 V1 F1 T1 G0". Torch is part of it. */
-export function setupName(s: Pick<Settings, 'preprocess' | 'hardware' | 'voting' | 'focusSweep' | 'gpu'>, torch: boolean): string {
-  return `P${+s.preprocess} H${+s.hardware} V${+s.voting} F${+s.focusSweep} T${+torch} G${+s.gpu}`
+export function setupName(
+  s: Pick<Settings, 'preprocess' | 'hardware' | 'voting' | 'focusSweep' | 'gpu' | 'crosshair'>,
+  torch: boolean,
+): string {
+  return `P${+s.preprocess} H${+s.hardware} V${+s.voting} F${+s.focusSweep} T${+torch} G${+s.gpu} X${+s.crosshair}`
 }

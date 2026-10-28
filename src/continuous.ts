@@ -24,6 +24,8 @@ export interface Capture {
   fast: boolean[]
   /** Per line: the best confidence it was read with. */
   conf: number[]
+  /** Per line, with the crosshair: pixels from it (null: not in the last frame, or no crosshair). */
+  dist: (number | null)[]
   /** Average confidence of the lines' reads. */
   confidence: number
   /** Time since the start of the run when the label was first written down. */
@@ -255,6 +257,8 @@ export async function runContinuous(
   while (!stop.stopped) {
     const region = frameRegion(video, s)
     const frame = grab(video, region)
+    // The crosshair sits in the middle of what is read (the box and the view are centred).
+    const focus = s.crosshair ? { x: frame.width / 2, y: frame.height / 2 } : undefined
     last = frame
     const sharp = sharpnessOf(frame)
     const t = Math.round(performance.now() - start)
@@ -278,6 +282,7 @@ export async function runContinuous(
       detLimit: s.detLimit,
       minConfidence: s.minConfidence,
       maxBoxes: 12,
+      focus,
     })
     const reads = wholeReads(allReads, frame.width, s.aimBox)
     const cut = allReads.filter((r) => !reads.includes(r)).map((r) => r.text)
@@ -291,7 +296,13 @@ export async function runContinuous(
     const update = tracker.feed(sure, s.fastConfidence)
     if (tracker.current) lastSeen = performance.now()
     if (update.added.length && tracker.current) {
-      const lines = tracker.current
+      // With the crosshair, the line nearest it comes first (the number aimed at); lines not in this
+      // frame keep their order after those that are.
+      const distOf = (k: string) => reads.find((r) => key(r.text) === k)?.dist
+      const lines = focus
+        ? [...tracker.current].sort((a, b) => (distOf(a) ?? Infinity) - (distOf(b) ?? Infinity))
+        : tracker.current
+      const dist = lines.map((k) => distOf(k) ?? null)
       const inLabel = sure.filter((r) => lines.includes(key(r.text)))
       const conf = lines.map((k) => Math.round((lineConf.get(k) ?? 0) * 1000) / 1000)
       // Show each line as it was read (not the upper-case key used for comparing).
@@ -307,12 +318,13 @@ export async function runContinuous(
           prev.fast = lines.map((k) => tracker.fast.has(k))
           prev.confidence = confidence
           prev.conf = conf
+          prev.dist = dist
           prev.crop = crop
         }
         onCapture(prev, false)
       } else if (update.started) {
         const fast = lines.map((k) => tracker.fast.has(k))
-        const c: Capture = { lines: shown, fast, conf, confidence, atMs: Math.round(performance.now() - start), crop }
+        const c: Capture = { lines: shown, fast, conf, dist, confidence, atMs: Math.round(performance.now() - start), crop }
         captures.push(c)
         onCapture(c, true)
       } else {
@@ -321,6 +333,7 @@ export async function runContinuous(
         c.fast = lines.map((k) => tracker.fast.has(k))
         c.confidence = confidence
         c.conf = conf
+        c.dist = dist
         c.crop = crop
         onCapture(c, false)
       }

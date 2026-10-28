@@ -222,6 +222,7 @@ export async function runScan(
       detLimit: s.detLimit,
       minConfidence: s.minConfidence,
       maxBoxes: 12,
+      focus: s.crosshair ? { x: frame.width / 2, y: frame.height / 2 } : undefined,
     })
     const frameReads = wholeReads(allReads, frame.width, s.aimBox)
     const cut = allReads.filter((r) => !frameReads.includes(r)).map((r) => r.text)
@@ -244,6 +245,7 @@ export async function runScan(
           x: ax.along(r.box) / size,
           y: ax.across(r.box) / size,
           h: r.box.thickness / size,
+          d: r.dist,
         })
       }
       const score = frameReads.reduce((a, r) => a + r.confidence, 0) * weight
@@ -262,7 +264,8 @@ export async function runScan(
   const original = best?.original ?? last ?? grab(video, frameRegion(video, s))
   if (voted.length && doneAt === null) doneAt = performance.now()
   return {
-    reads: inReadingOrder(voted),
+    // With the crosshair the text nearest it comes first; otherwise the label's reading order.
+    reads: s.crosshair ? [...voted].sort((a, b) => (a.d ?? Infinity) - (b.d ?? Infinity)) : inReadingOrder(voted),
     original,
     processed: best ? best.processed : s.preprocess ? processedCopy(original) : null,
     frameReads: best?.reads ?? [],

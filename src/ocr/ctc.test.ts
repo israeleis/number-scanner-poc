@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cleanDigits, ctcDecode } from './ctc'
-import { boxCorners, dbBoxes, inTextOrder, joinLineParts } from './engine'
+import { boxCorners, dbBoxes, distanceToBox, inTextOrder, joinLineParts } from './engine'
 import { laplacianVariance, preprocess } from './imageops'
 
 describe('ctcDecode', () => {
@@ -149,5 +149,18 @@ describe('joinLineParts', () => {
     const a = Math.PI / 6
     const p = (d: number) => box(200 + d * Math.cos(a), 200 + d * Math.sin(a), 90, 20, a)
     expect(joinLineParts([p(-43), p(43)])).toHaveLength(1)
+  })
+})
+
+describe('distanceToBox', () => {
+  const b = { cx: 100, cy: 50, length: 100, thickness: 20, angle: 0 }
+  it('is 0 inside the box, and the gap outside it', () => {
+    expect(distanceToBox({ x: 120, y: 55 }, b)).toBe(0)
+    expect(distanceToBox({ x: 100, y: 90 }, b)).toBe(30)
+    expect(distanceToBox({ x: 160, y: 50 }, b)).toBe(10)
+  })
+  it('follows a turned box', () => {
+    const turned = { ...b, angle: Math.PI / 2 }
+    expect(distanceToBox({ x: 100, y: 140 }, turned)).toBeCloseTo(40)
   })
 })
