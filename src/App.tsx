@@ -69,18 +69,26 @@ export default function App() {
   /** Precision while held (button or finger on the picture): the point, shared with the scan loops. */
   const precisionRef = useRef<Precision>({ point: null, only: false })
   const [aim, setAim] = useState<{ fx: number; fy: number; only: boolean } | null>(null)
-  const holdPrecision = (p: { fx: number; fy: number } | null, only = false) => {
+  /** The point a touch on the picture chose (results ordered from it until the scan ends). */
+  const chosenRef = useRef<{ fx: number; fy: number } | null>(null)
+  const setPoint = (p: { fx: number; fy: number } | null, only = false) => {
     precisionRef.current.point = p
     precisionRef.current.only = only
     setAim(p && { ...p, only })
   }
-  /** The point a finger shows: about 1 cm (40 CSS pixels) above the fingertip, so it does not hide it. */
+  /** A touch on the picture moves the cross there; it stays after the finger lifts. */
+  const choosePoint = (p: { fx: number; fy: number } | null) => {
+    chosenRef.current = p
+    setPoint(p)
+  }
+  /** The precision button: the cross in the middle, only the line under it, while held. */
+  const holdPrecision = (held: boolean) =>
+    held ? setPoint({ fx: 0.5, fy: 0.5 }, true) : setPoint(chosenRef.current)
   const pointIn = (e: React.PointerEvent<HTMLElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
-    const lift = e.pointerType === 'mouse' ? 0 : 40
     return {
       fx: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      fy: Math.min(1, Math.max(0, (e.clientY - lift - r.top) / r.height)),
+      fy: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
     }
   }
   /** While scanning: is the phone steady enough to read? (The aiming box is grey while it moves.) */
@@ -309,6 +317,8 @@ export default function App() {
       }
     } finally {
       setScanning(false)
+      // The next scan starts with the cross back in the middle.
+      choosePoint(null)
       // Back to the phone's own autofocus between scans.
       if (track && canSweepFocus(caps)) setFocus(track, null)
     }
@@ -423,14 +433,13 @@ export default function App() {
           </div>
           <div
             className={settings.aimBox ? 'viewfinder strip' : 'viewfinder'}
-            // A finger held on the picture: results are sorted from just above it instead of the middle.
+            // A touch on the picture moves the cross there (it can be dragged); results are ordered from
+            // it until the scan ends.
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId)
-              holdPrecision(pointIn(e))
+              choosePoint(pointIn(e))
             }}
-            onPointerMove={(e) => aim && holdPrecision(pointIn(e))}
-            onPointerUp={() => holdPrecision(null)}
-            onPointerCancel={() => holdPrecision(null)}
+            onPointerMove={(e) => e.buttons && choosePoint(pointIn(e))}
           >
             <video ref={videoRef} playsInline muted style={{ transform: `scale(${settings.viewZoom})` }} />
             {settings.aimBox && (
@@ -483,10 +492,10 @@ export default function App() {
             // Precision while held: the crosshair in the middle, only the line under it is read.
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId)
-              holdPrecision({ fx: 0.5, fy: 0.5 }, true)
+              holdPrecision(true)
             }}
-            onPointerUp={() => holdPrecision(null)}
-            onPointerCancel={() => holdPrecision(null)}
+            onPointerUp={() => holdPrecision(false)}
+            onPointerCancel={() => holdPrecision(false)}
             onContextMenu={(e) => e.preventDefault()}
           >
             {aim?.only ? 'דיוק: רק מה שמתחת לצלב' : 'החזק לדיוק'}

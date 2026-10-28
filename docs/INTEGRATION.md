@@ -222,18 +222,18 @@ distance from the middle (0 when the middle is on it), so the lab data shows whi
 (The label's own reading order, along its slant, is still in the code, `inTextOrder`, for showing a
 whole label.)
 
-**A finger on the picture re-sorts.** While a finger is held on the picture, everything is still read, but
-results are sorted from a point about 1 cm above the fingertip instead of from the middle (a yellow cross
-shows the point). It sits above the fingertip, like the phone's text-selection magnifier, because a finger
-hides the text it touches.
+**A touch on the picture moves the cross.** A touch (or a drag) on the picture moves a yellow cross there,
+and it stays after the finger lifts. Everything is still read, but results are ordered from the cross,
+nearest first, instead of from the middle. When the scan ends, the next one starts with the cross back in
+the middle.
 
 **The precision button limits.** While **החזק לדיוק** is held, a red crosshair is in the middle and only
 the line under it (or within one line's height) is read. Nothing else is read, so it is also quicker
 (one line instead of 5–12). For a label with a lot of text where the default did not get the number.
 
-Both work during a running scan (natural in continuous scanning). Frames log the held point (`aim`) and
-whether only that line was read (`only`). The owner has not yet chosen between the finger and the
-crosshair; both stay for trying, and where they sit is for MICMS's screen design.
+Both work during a running scan (natural in continuous scanning); after the precision button is
+released, the cross goes back to where a touch put it. Frames log the point used (`aim`) and whether only
+that line was read (`only`). Where the button sits is for MICMS's screen design.
 
 ## What MICMS adds
 

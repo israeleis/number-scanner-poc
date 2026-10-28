@@ -61,7 +61,7 @@ export interface ScanProgress {
  * results are sorted from the middle. The scan loops read it on every frame, so it can change during
  * a scan.
  * - The precision button: the middle, `only`: just the line under it is read.
- * - A finger on the picture: a point just above the fingertip; everything is read, sorted nearest it.
+ * - A touch on the picture: that point, until the scan ends; everything is read, sorted nearest it.
  */
 export interface Precision {
   point: { fx: number; fy: number } | null

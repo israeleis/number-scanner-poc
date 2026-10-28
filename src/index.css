@@ -127,5 +127,5 @@ select { width: 100%; padding: 10px; margin-top: 4px; border-radius: 8px; border
 .viewfinder { touch-action: none; user-select: none; -webkit-user-select: none; }
 .precision { width: 100%; padding: 10px; font-weight: 700; user-select: none; -webkit-user-select: none; touch-action: none; }
 .precision.on { background: #b71c1c; border-color: #ff1744; }
-/* Under a finger the cross is yellow: it orders results, it does not limit them. */
+/* A cross moved by a touch is yellow: it orders results, it does not limit them. */
 .crosshair.finger::before, .crosshair.finger::after { background: #ffd600; }
