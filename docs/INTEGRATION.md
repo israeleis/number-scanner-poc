@@ -56,7 +56,7 @@ camera (4K, back camera that focuses closest)
   → direction: PaddleOCR direction model says whether each line is upside down (one run per frame)
   → recognition: PaddleOCR PP-OCRv3 English (CTC), each line straightened to 48 px high
   → clean-up: quote marks inside runs of 4+ digits are dropped (barcode guard bars)
-  → order: lines in the label's own reading order (along its slant; upside-down labels from the bottom)
+  → order: nearest the middle of the box first (the number aimed at is most likely there)
   → single scan: reads of 3 sharp frames are voted character by character
     continuous scan: lines become a label (see below), with a beep and a vibration
 ```
@@ -213,14 +213,18 @@ phone ends the current label, and the aiming box turns grey and dashed while mov
 picture change, so they are set from real scans. In the test browser a sliding picture measured 38–44 and
 a still one 0.
 
-## Crosshair
+## Centre-out order and the precision button
 
-A switch, **צלב**, off by default, to turn on when a scan struggles. A small cross sits in the middle of the
-aiming box. Everything is still read, but boxes are read nearest the cross first, and the lines are listed
-nearest first, so the number aimed at comes first, in single and continuous scans. Each line saves its
-distance from the cross (0 when the cross is on it), so the lab data shows which number the tester
-wanted. In MICMS this is the natural input for matching: try the line under the cross first, then its
-neighbours.
+**By default all the text in the box is read, and the results always come centre-out:** the line nearest
+the middle of the aiming box first. The tester aims the middle at the number they want, so it is most
+likely first, and that is the order for matching against the database in MICMS. Each line saves its
+distance from the middle (0 when the middle is on it), so the lab data shows which number was aimed at.
+(The label's own reading order, along its slant, is still in the code, `inTextOrder`, for showing a
+whole label.)
+
+**Precision button (דיוק, off by default):** for a label with a lot of text where the default did not get
+the number. It shows a crosshair in the middle, and only the line under the crosshair, or within one
+line's height of it, is read. Nothing else is read, so it is also quicker (one line instead of 5–12).
 
 ## What MICMS adds
 

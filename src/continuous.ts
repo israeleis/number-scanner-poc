@@ -271,8 +271,9 @@ export async function runContinuous(
       await new Promise((r) => setTimeout(r, 30))
       continue
     }
-    // The crosshair sits in the middle of what is read (the box and the view are centred).
-    const focus = s.crosshair ? { x: frame.width / 2, y: frame.height / 2 } : undefined
+    // The middle of what is read (the box and the view are centred): results come from it outwards,
+    // and with precision on (the crosshair) only what is under it is read.
+    const focus = { x: frame.width / 2, y: frame.height / 2 }
     last = frame
     const sharp = sharpnessOf(frame)
     if (sharp < s.blurThreshold) {
@@ -296,6 +297,7 @@ export async function runContinuous(
       minConfidence: s.minConfidence,
       maxBoxes: 12,
       focus,
+      onlyAtFocus: s.crosshair,
     })
     const reads = wholeReads(allReads, frame.width, s.aimBox)
     const cut = allReads.filter((r) => !reads.includes(r)).map((r) => r.text)
@@ -309,12 +311,10 @@ export async function runContinuous(
     const update = tracker.feed(sure, s.fastConfidence)
     if (tracker.current) lastSeen = performance.now()
     if (update.added.length && tracker.current) {
-      // With the crosshair, the line nearest it comes first (the number aimed at); lines not in this
-      // frame keep their order after those that are.
+      // The line nearest the middle comes first; lines not in this frame keep their order after those
+      // that are.
       const distOf = (k: string) => reads.find((r) => key(r.text) === k)?.dist
-      const lines = focus
-        ? [...tracker.current].sort((a, b) => (distOf(a) ?? Infinity) - (distOf(b) ?? Infinity))
-        : tracker.current
+      const lines = [...tracker.current].sort((a, b) => (distOf(a) ?? Infinity) - (distOf(b) ?? Infinity))
       const dist = lines.map((k) => distOf(k) ?? null)
       const inLabel = sure.filter((r) => lines.includes(key(r.text)))
       const conf = lines.map((k) => Math.round((lineConf.get(k) ?? 0) * 1000) / 1000)

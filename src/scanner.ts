@@ -1,7 +1,7 @@
 // One scan: take frames from the camera until there is a result or time runs out.
 import { textAxes, type Engine, type TextRead } from './ocr/engine'
 import { laplacianVariance, preprocess, toGray } from './ocr/imageops'
-import { inReadingOrder, vote, type FrameRead, type VotedRead } from './ocr/vote'
+import { vote, type FrameRead, type VotedRead } from './ocr/vote'
 import type { FocusSweep } from './camera'
 import { SteadyGate } from './motion'
 import type { Settings } from './settings'
@@ -240,7 +240,9 @@ export async function runScan(
       detLimit: s.detLimit,
       minConfidence: s.minConfidence,
       maxBoxes: 12,
-      focus: s.crosshair ? { x: frame.width / 2, y: frame.height / 2 } : undefined,
+      // Results come from the middle of the box outwards; with precision on, only what is under the cross.
+      focus: { x: frame.width / 2, y: frame.height / 2 },
+      onlyAtFocus: s.crosshair,
     })
     const frameReads = wholeReads(allReads, frame.width, s.aimBox)
     const cut = allReads.filter((r) => !frameReads.includes(r)).map((r) => r.text)
@@ -282,8 +284,8 @@ export async function runScan(
   const original = best?.original ?? last ?? grab(video, frameRegion(video, s))
   if (voted.length && doneAt === null) doneAt = performance.now()
   return {
-    // With the crosshair the text nearest it comes first; otherwise the label's reading order.
-    reads: s.crosshair ? [...voted].sort((a, b) => (a.d ?? Infinity) - (b.d ?? Infinity)) : inReadingOrder(voted),
+    // Nearest the middle of the box first.
+    reads: [...voted].sort((a, b) => (a.d ?? Infinity) - (b.d ?? Infinity)),
     original,
     processed: best ? best.processed : s.preprocess ? processedCopy(original) : null,
     frameReads: best?.reads ?? [],

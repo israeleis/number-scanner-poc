@@ -33,7 +33,8 @@ export interface Settings {
   gyroThreshold: number
   diffThreshold: number
   steadyMs: number
-  /** A crosshair in the middle: text nearest it is read first and listed first. */
+  /** Precision: a crosshair in the middle, and only the line under it is read. (Without it, all text
+   * is read and listed from the middle of the box outwards.) */
   crosshair: boolean
   /** Mark ✓/✗ on the phone after each scan; off: everything is sent unmarked and checked later. */
   review: boolean

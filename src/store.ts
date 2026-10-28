@@ -24,8 +24,8 @@ export interface Line {
   words: string[]
   /** Continuous scanning: taken from one frame on high confidence, without a second frame agreeing. */
   fast: boolean | null
-  /** With the crosshair: pixels from it to the line (0: the crosshair was on it). The nearest line is
-   * the number aimed at. */
+  /** Pixels from the middle of the box (the crosshair) to the line; 0: on it. The nearest line is
+   * most likely the number aimed at. */
   dist: number | null
   /** Continuous scanning: the label it belongs to (1 is the first), when that label was written
    * down (ms from the start), and the index of the label's picture. */
@@ -82,7 +82,7 @@ export interface ScanRecord {
   /** Every camera the phone showed, with which way it faces and how close it focuses. */
   cameras: { deviceId: string; label: string; back: boolean; minFocus: number | null }[]
   focusSweep: boolean
-  /** The crosshair was on: lines read and listed nearest it first. */
+  /** Precision was on: only the line under the crosshair was read. */
   crosshair: boolean
   /** Reading waited for a steady phone, with these thresholds. */
   waitSteady: boolean

@@ -120,7 +120,7 @@ select { width: 100%; padding: 10px; margin-top: 4px; border-radius: 8px; border
 .crosshair::before, .crosshair::after { content: ''; position: absolute; background: #ff1744; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
 .crosshair::before { left: 50%; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); }
 .crosshair::after { top: 50%; left: 0; right: 0; height: 2px; transform: translateY(-50%); }
-/* With the crosshair, the first line is the one aimed at. */
+/* The first line is the one nearest the middle (with precision on, the only one). */
 .last-capture.aimed .words:first-child .word { border-color: #ff1744; background: rgba(255, 23, 68, 0.25); }
 /* The phone is moving: nothing is read until it is steady. */
 .aim.moving { border-color: rgba(160, 160, 160, 0.6); border-style: dashed; }

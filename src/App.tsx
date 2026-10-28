@@ -406,7 +406,7 @@ export default function App() {
             )}
             {scanning && progress && <LiveBoxes video={videoRef.current} progress={progress} zoom={settings.viewZoom} />}
             {scanning && settings.mode === 'continuous' && live.length > 0 && (
-              <div className={settings.crosshair ? 'last-capture aimed' : 'last-capture'} key={live.length}>
+              <div className="last-capture aimed" key={live.length}>
                 <span className="count">{live.length}</span>
                 <Lines lines={live[0].lines} />
               </div>
@@ -439,7 +439,7 @@ export default function App() {
           <div className="toggles">
             <Toggle label="עיבוד תמונה" on={settings.preprocess} set={(v) => setSettings({ ...settings, preprocess: v })} />
             <Toggle label="בקרת מצלמה" on={settings.hardware} set={(v) => setSettings({ ...settings, hardware: v })} />
-            <Toggle label="צלב" on={settings.crosshair} set={(v) => setSettings({ ...settings, crosshair: v })} />
+            <Toggle label="דיוק" on={settings.crosshair} set={(v) => setSettings({ ...settings, crosshair: v })} />
             <Toggle label="הצבעה" on={settings.voting} set={(v) => setSettings({ ...settings, voting: v })} />
             <Toggle label="מעבד גרפי" on={settings.gpu} set={(v) => setSettings({ ...settings, gpu: v })} />
             {canSweepFocus(caps) && (

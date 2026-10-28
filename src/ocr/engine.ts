@@ -52,10 +52,29 @@ export interface OcrOptions {
   /** At most this many text boxes are read per frame. */
   maxBoxes: number
   /**
-   * A crosshair point (pixels of the image): boxes are read nearest it first, and the reads come back
-   * nearest first. Without it: largest boxes first, reads in reading order.
+   * A point (pixels of the image, normally the middle of the aiming box): boxes are read nearest it
+   * first, and the reads come back nearest first. Without it: largest boxes first, reads in the
+   * label's reading order.
    */
   focus?: { x: number; y: number }
+  /** Precision: read only the box under the point, or touching it within one line's height. */
+  onlyAtFocus?: boolean
+}
+
+/**
+ * Which boxes to read, in order: nearest the focus point first (else largest first), at most
+ * `maxBoxes`; with `onlyAtFocus`, just the nearest one, and only if it is under the point or within
+ * one line's height of it.
+ */
+export function chooseBoxes<B extends Pick<Box, 'cx' | 'cy' | 'length' | 'thickness' | 'angle' | 'w' | 'h'>>(
+  boxes: B[],
+  o: Pick<OcrOptions, 'focus' | 'onlyAtFocus' | 'maxBoxes'>,
+): B[] {
+  const f = o.focus
+  const sorted = [...boxes]
+    .sort((a, b) => (f ? distanceToBox(f, a) - distanceToBox(f, b) : b.w * b.h - a.w * a.h))
+    .slice(0, o.maxBoxes)
+  return f && o.onlyAtFocus ? sorted.slice(0, 1).filter((b) => distanceToBox(f, b) <= b.thickness) : sorted
 }
 
 /** Pixels from a point to a (turned) box; 0 when the point is inside it. */
@@ -170,9 +189,7 @@ export class Engine {
   async read(canvas: HTMLCanvasElement, options: OcrOptions): Promise<TextRead[]> {
     const t0 = performance.now()
     const focus = options.focus
-    const boxes = (await this.detect(canvas, options.detLimit))
-      .sort((a, b) => (focus ? distanceToBox(focus, a) - distanceToBox(focus, b) : b.w * b.h - a.w * a.h))
-      .slice(0, options.maxBoxes)
+    const boxes = chooseBoxes(await this.detect(canvas, options.detLimit), options)
     const t1 = performance.now()
     let recs = 0
     const reads: TextRead[] = []

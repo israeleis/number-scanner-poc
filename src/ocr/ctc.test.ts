@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cleanDigits, ctcDecode } from './ctc'
-import { boxCorners, dbBoxes, distanceToBox, inTextOrder, joinLineParts } from './engine'
+import { boxCorners, chooseBoxes, dbBoxes, distanceToBox, inTextOrder, joinLineParts } from './engine'
 import { laplacianVariance, preprocess } from './imageops'
 
 describe('ctcDecode', () => {
@@ -162,5 +162,23 @@ describe('distanceToBox', () => {
   it('follows a turned box', () => {
     const turned = { ...b, angle: Math.PI / 2 }
     expect(distanceToBox({ x: 100, y: 140 }, turned)).toBeCloseTo(40)
+  })
+})
+
+describe('chooseBoxes', () => {
+  const box = (cy: number, length = 100) => ({ cx: 100, cy, length, thickness: 20, angle: 0, w: length, h: 20 })
+  const boxes = [box(20, 300), box(100), box(130)]
+  const focus = { x: 100, y: 105 }
+
+  it('reads everything, nearest the middle first', () => {
+    expect(chooseBoxes(boxes, { focus, maxBoxes: 12 }).map((b) => b.cy)).toEqual([100, 130, 20])
+  })
+
+  it('precision reads only the line under the crosshair', () => {
+    expect(chooseBoxes(boxes, { focus, maxBoxes: 12, onlyAtFocus: true }).map((b) => b.cy)).toEqual([100])
+  })
+
+  it('precision reads nothing when no line is near the crosshair', () => {
+    expect(chooseBoxes(boxes, { focus: { x: 100, y: 400 }, maxBoxes: 12, onlyAtFocus: true })).toEqual([])
   })
 })
