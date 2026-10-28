@@ -252,6 +252,11 @@ This is what the POC skipped on purpose, because it read all the text without kn
 - **Matching cascade against the unit's real serials** (Task 13): exact, then suffix (last N
   characters), then fuzzy, weighted for the confusions seen here (O/0, I/1, B/8, S/5, X/K, Z/2, Q/O),
   over every line and every word of the label. Spaces and punctuation are ignored when comparing.
+  **Match whole lines, not only words:** a number is often printed in parts, with a hyphen or a space
+  (`7290000-423014`, `SN 7310 592`, barcode digits split by guard bars as `7 290002 007500`), so a word
+  alone may be only part of it. The scanner always returns whole lines (and the words of each line);
+  matching must try each line with its spaces and hyphens removed, then pairs and runs of neighbouring
+  words, then single words.
   Results are ranked, never a silent guess.
 - **Use matching to decide when to stop:** a label is done as soon as one of its lines matches an item
   strongly, even from one frame. A line that matches nothing waits for a second frame. This removes most
